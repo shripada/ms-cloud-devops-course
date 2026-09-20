@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A practical, beginner-friendly Docker course for aspiring Cloud and DevOps engineers.">
+  <title>Docker from the ground up</title>
+  <link rel="stylesheet" href="assets/course.css">
+</head>
+<body class="home">
+  <main>
+    <header class="hero">
+      <div class="eyebrow"><span class="mark" aria-hidden="true">&gt;_</span> Cloud/DevOps course</div>
+      <h1>Docker from<br>the ground up</h1>
+      <p class="lede">Learn containers by running, building and debugging them—not by memorising definitions.</p>
+      <div class="hero-actions">
+        <a class="button primary" href="lessons/0001-your-first-container.html">Start lesson 1 <span aria-hidden="true">→</span></a>
+        <a class="button" href="#course-map">See the course map</a>
+      </div>
+      <ul class="course-facts" aria-label="Course facts">
+        <li><strong>8</strong><span>short lessons</span></li>
+        <li><strong>Hands-on</strong><span>terminal exercises</span></li>
+        <li><strong>Beginner</strong><span>friendly</span></li>
+      </ul>
+    </header>
+
+    <section aria-labelledby="begin-heading">
+      <div class="section-heading">
+        <div>
+          <div class="kicker">Begin here</div>
+          <h2 id="begin-heading">Your first win</h2>
+        </div>
+        <span class="time">~15 min</span>
+      </div>
+      <a class="lesson-card available" href="lessons/0001-your-first-container.html">
+        <span class="lesson-number">01</span>
+        <span class="lesson-copy">
+          <strong>Your first container</strong>
+          <span>Run a real web server, inspect it as a process, read its logs and clean it up.</span>
+          <span class="tags"><span>Run</span><span>Ports</span><span>Logs</span></span>
+        </span>
+        <span class="card-arrow" aria-hidden="true">→</span>
+      </a>
+    </section>
+
+    <section id="course-map" aria-labelledby="map-heading">
+      <div class="kicker">Course map</div>
+      <h2 id="map-heading">Where this is going</h2>
+      <p class="section-intro">Each lesson adds one practical skill. Upcoming lessons will become links as they are published.</p>
+      <ol class="roadmap">
+        <li class="done"><span>01</span><div><strong>Your first container</strong><small>Run, inspect and remove an nginx container</small><small class="slides-link"><a href="slides/0001-Docker.pptx">Slides (PPTX)</a></small></div><em>Ready</em></li>
+        <li class="done"><span>02</span><div><strong><a href="lessons/0002-images-layers-registries.html">Images, layers &amp; registries</a></strong><small>Understand what you pull and how images are stored</small><small class="slides-link"><a href="slides/0002-Docker-Images-Layers-Registries.pptx">Slides (PPTX)</a></small></div><em>Ready</em></li>
+        <li class="done"><span>03</span><div><strong><a href="lessons/0003-write-a-dockerfile.html">Write a Dockerfile</a></strong><small>Package an application with cache-friendly layers</small><small class="slides-link"><a href="slides/0003-Docker-Writing-A-Dockerfile.pptx">Slides (PPTX)</a></small></div><em>Ready</em></li>
+        <li><span>04</span><div><strong>Ports &amp; persistent data</strong><small>Connect to services and keep data beyond a container</small></div></li>
+        <li><span>05</span><div><strong>Networks &amp; Compose</strong><small>Run an app and database together</small></div></li>
+        <li><span>06</span><div><strong>Debug broken containers</strong><small>Use logs, exec and inspect to find failures</small></div></li>
+        <li><span>07</span><div><strong>Under the hood</strong><small>Build interview-ready intuition for isolation</small></div></li>
+        <li><span>08</span><div><strong>Build &amp; push in CI</strong><small>Publish an image with GitHub Actions</small></div></li>
+      </ol>
+    </section>
+
+    <section class="reference-block" aria-labelledby="reference-heading">
+      <div>
+        <div class="kicker">Keep nearby</div>
+        <h2 id="reference-heading">Quick reference</h2>
+        <p>Look up a command or refresh a term without leaving the course.</p>
+      </div>
+      <div class="reference-links">
+        <a href="reference/docker-cli.html"><span aria-hidden="true">$</span> Docker CLI cheat sheet <b aria-hidden="true">→</b></a>
+        <a href="reference/glossary.html"><span aria-hidden="true">Aa</span> Docker glossary <b aria-hidden="true">→</b></a>
+      </div>
+    </section>
+
+    <footer>
+      <span>Docker from the ground up</span>
+      <span>Built for learning by doing.</span>
+    </footer>
+  </main>
+</body>
+</html>

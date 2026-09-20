@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docker Glossary</title><link rel="stylesheet" href="../assets/course.css"></head><body><main>
+<div class="kicker">Reference</div><h1>Docker Glossary</h1>
+<p class="lede">The words this course uses, and only these meanings.</p>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><b>Image</b></td><td>An immutable, layered package of files, binaries, libraries and config needed to run a container. A template, not a running thing. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">docs</a></td></tr>
+<tr><td><b>Container</b></td><td>An isolated process (plus its filesystem) started from an image. Shares the host's kernel. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">docs</a></td></tr>
+<tr><td><b>Layer</b></td><td>One set of filesystem changes (add/modify/remove files). Images are stacks of layers.</td></tr>
+<tr><td><b>Registry</b></td><td>A server that stores and distributes images (e.g. Docker Hub).</td></tr>
+<tr><td><b>Tag</b></td><td>A human label on an image version, e.g. <code>nginx:1.27</code>. Default is <code>latest</code>.</td></tr>
+<tr><td><b>Docker daemon</b></td><td>The background service (<code>dockerd</code>) that actually builds and runs containers. The <code>docker</code> CLI just talks to it.</td></tr>
+<tr><td><b>Port publishing</b></td><td><code>-p HOST:CONTAINER</code> — forwards a host port into a container port.</td></tr>
+<tr><td><b>Virtual machine (VM)</b></td><td>Emulated computer running its own full OS and kernel. Heavier than a container.</td></tr>
+</table>
+<nav class="course"><a href="../index.html">← Course home</a><a href="docker-cli.html">CLI cheat sheet →</a></nav>
+</main></body></html>

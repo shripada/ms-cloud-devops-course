@@ -1,0 +1,185 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Write a Dockerfile</title><link rel="stylesheet" href="../assets/course.css"></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 03 · <a href="../slides/0003-Docker-Writing-A-Dockerfile.pptx">Slides (PPTX)</a></div>
+<h1>Write a Dockerfile</h1>
+<p class="lede">Today's goal: package your own Python app and a Node.js app as images, run them, and make rebuilds fast. About 35 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>So far you have only used images that other people built. In a real job, you write the image for your team's app. In placement interviews, one of the most common tasks is “write a Dockerfile for this app”. Interviewers then ask why you ordered the lines the way you did. By the end of this lesson you can answer both.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>A Dockerfile is a recipe.</b> It is a plain text file with step-by-step instructions: start from this base image, copy these files, run this command. <code>docker build</code> follows the recipe and produces an image. If you have written a Makefile or a build script in college, it is the same idea. <a href="https://docs.docker.com/reference/dockerfile/">[Dockerfile reference]</a></p>
+<p><b>Each instruction becomes a layer, and layers are cached.</b> You saw layers in lesson 2. When you rebuild, Docker reuses a layer if its instruction and its input files have not changed. The moment one layer changes, <em>every layer after it</em> is rebuilt. So you put things that change rarely (dependencies) at the top and things that change often (your code) at the bottom. <a href="https://docs.docker.com/build/cache/">[Docker docs: build cache]</a></p>
+<p><b><code>RUN</code> happens at build time. <code>CMD</code> happens at run time.</b> <code>RUN pip install …</code> executes once, while the image is being built, and the result is saved in a layer. <code>CMD</code> only records the command to start when someone does <code>docker run</code>. Think of it like compile time versus run time in C.</p>
+<p class="aside">Tiffin analogy: <code>RUN</code> is cooking the food at home in the morning. <code>CMD</code> is the note on the box saying “open and eat at 1 pm”. The cooking is already done before the box leaves the house.</p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Make a new folder anywhere and go inside it:
+<pre><code>mkdir hello-docker &amp;&amp; cd hello-docker</code></pre></li>
+<li>Create <code>app.py</code>, a tiny Flask web app:
+<pre><code>from flask import Flask
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Hello from my own image!\n"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)</code></pre>
+<code>host="0.0.0.0"</code> is important. By default Flask listens only on <code>127.0.0.1</code>, which means “inside this container only”, so requests from your Mac would never reach it.</li>
+<li>Create <code>requirements.txt</code> with one line:
+<pre><code>flask==3.1.*</code></pre>
+You don't need Python or Flask installed on your Mac. Everything gets installed <em>inside</em> the image.</li>
+<li>Create a file named exactly <code>Dockerfile</code> (no extension):
+<pre><code>FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+CMD ["python", "app.py"]</code></pre>
+Line by line:
+<ul>
+<li><code>FROM</code>: start from the official slim Python image.</li>
+<li><code>WORKDIR</code>: create <code>/app</code> and <code>cd</code> into it for all the lines after it.</li>
+<li><code>COPY requirements.txt .</code> and <code>RUN pip install</code>: install dependencies <em>before</em> copying the code. This is the caching trick from idea 2.</li>
+<li><code>COPY . .</code>: copy the rest of your folder into <code>/app</code>.</li>
+<li><code>EXPOSE</code>: only documentation. It does <em>not</em> publish the port. You still need <code>-p</code>.</li>
+<li><code>CMD</code>: the command to start the app. The <code>["…", "…"]</code> style (called <em>exec form</em>) is the recommended one.</li>
+</ul></li>
+<li>Build the image. The <code>.</code> at the end means “use this folder as the build context”:
+<pre><code>docker build -t hello-docker:v1 .</code></pre></li>
+<li>Run it and test it:
+<pre><code>docker run -d -p 5000:5000 --name hello hello-docker:v1
+curl localhost:5000</code></pre>
+If port 5000 is busy on your Mac (macOS AirPlay Receiver sometimes uses it), use <code>-p 5050:5000</code> and <code>curl localhost:5050</code>.</li>
+<li>Now see the cache working. Change the message in <code>app.py</code>, then rebuild:
+<pre><code>docker build -t hello-docker:v2 .</code></pre>
+In the output, the <code>pip install</code> step says <code>CACHED</code>. Only the <code>COPY . .</code> step ran again, so the build finishes in a second or two.</li>
+<li>Now break it on purpose. Move <code>COPY . .</code> to <em>above</em> the <code>RUN pip install</code> line, change <code>app.py</code> again and rebuild. This time <code>pip install</code> runs every single time. That is the mistake interviewers look for.</li>
+<li>Put the Dockerfile back in the right order, then clean up:
+<pre><code>docker rm -f hello
+docker image history hello-docker:v2</code></pre>
+In the history, you can see one layer per instruction from your own Dockerfile, sitting on top of the Python base layers.</li>
+</ol>
+
+<h2>Do it again: a Node.js + Express app</h2>
+<p>Many companies use Node.js for backends, so let's package an Express app too. The recipe is the same as before. Only the ingredients change: the base image, the dependency file and the install command. Once you see the pattern, you can write a Dockerfile for almost any language.</p>
+<ol class="steps">
+<li>Make a second folder next to the first one:
+<pre><code>cd ..
+mkdir hello-node &amp;&amp; cd hello-node</code></pre></li>
+<li>Create <code>package.json</code>. This file does the same job for Node that <code>requirements.txt</code> did for Python:
+<pre><code>{
+  "name": "hello-node",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}</code></pre></li>
+<li>Create <code>server.js</code>:
+<pre><code>const express = require("express");
+
+const app = express();
+
+app.get("/", (req, res) =&gt; {
+  res.send("Hello from my Node image!\n");
+});
+
+app.listen(3000, () =&gt; {
+  console.log("Listening on port 3000");
+});</code></pre>
+When you don't pass a host to <code>app.listen</code>, Node listens on all network interfaces. So here you don't need the <code>0.0.0.0</code> fix that Flask needed.</li>
+<li>Create <code>.dockerignore</code> with this one line:
+<pre><code>node_modules</code></pre>
+If you ever run <code>npm install</code> on your Mac, a large <code>node_modules</code> folder appears. It holds packages built for macOS, not Linux, and you don't want them copied into the image. The image installs its own copy.</li>
+<li>Create the <code>Dockerfile</code>. Compare it line by line with the Python one:
+<pre><code>FROM node:22-slim
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+EXPOSE 3000
+CMD ["node", "server.js"]</code></pre>
+<ul>
+<li><code>FROM node:22-slim</code>: the official Node image (an LTS version) in place of Python.</li>
+<li><code>COPY package*.json ./</code>: copies <code>package.json</code>, and also <code>package-lock.json</code> if you have one. Same caching trick as before: dependencies first, code later.</li>
+<li><code>RUN npm install --omit=dev</code>: installs only the packages needed to run, skipping dev-only tools like test frameworks.</li>
+<li><code>CMD ["node", "server.js"]</code>: start the server directly with <code>node</code>.</li>
+</ul></li>
+<li>Build, run and test:
+<pre><code>docker build -t hello-node:v1 .
+docker run -d -p 3000:3000 --name node-app hello-node:v1
+curl localhost:3000</code></pre></li>
+<li>Change the message in <code>server.js</code> and rebuild as <code>hello-node:v2</code>. Just like with Python, the <code>npm install</code> step shows <code>CACHED</code>.</li>
+<li>Clean up:
+<pre><code>docker rm -f node-app</code></pre></li>
+</ol>
+<p class="aside">In company projects, <code>package-lock.json</code> is always committed to Git, and the Dockerfile uses <code>npm ci --omit=dev</code> in place of <code>npm install</code>. <code>npm ci</code> installs exactly the versions in the lock file, so every build gets the same packages. It fails if there is no lock file, which is why we used <code>npm install</code> here. <a href="https://docs.npmjs.com/cli/commands/npm-ci">[npm docs]</a></p>
+
+<div class="box"><b>Stretch:</b> create a <code>.dockerignore</code> file containing <code>__pycache__</code> and <code>.git</code>. It works like <code>.gitignore</code>: those files are never sent to the build, so the image stays clean and small. Then run <code>docker images hello-docker</code> and compare the size with <code>python:3.12</code> (the non-slim version) if you are curious. The difference is usually hundreds of MB.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="RUN executes during docker build and its result is saved in a layer. CMD only runs when a container starts.">
+<p class="q">1. When does <code>RUN pip install -r requirements.txt</code> actually execute?</p>
+<button>Every time you do docker run</button>
+<button>Once, during docker build</button>
+<button>Only when you push the image to a registry</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="Changing one layer invalidates every layer after it. Copying code first means any code change forces pip install to run again.">
+<p class="q">2. Your friend's Dockerfile has <code>COPY . .</code> before <code>RUN pip install</code>. Every small code change takes 2 minutes to build. Why?</p>
+<button>pip is slow inside containers</button>
+<button>COPY . . is always slower than copying single files</button>
+<button>Any code change breaks the cache for every layer after it, including pip install</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="EXPOSE only documents the port. Publishing to the host needs -p (or -P).">
+<p class="q">3. The Dockerfile says <code>EXPOSE 5000</code>. You run <code>docker run -d hello-docker:v1</code> with no <code>-p</code>. Can your browser reach it?</p>
+<button>No. EXPOSE is only documentation. You still need -p</button>
+<button>Yes, on localhost:5000</button>
+<button>Yes, but only on a random port</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="127.0.0.1 inside the container means the container itself. 0.0.0.0 accepts connections from outside it.">
+<p class="q">4. The container is running and <code>-p</code> is correct, but <code>curl</code> says “connection reset”. The app listens on <code>127.0.0.1</code>. What's wrong?</p>
+<button>Docker blocks port 5000 by default</button>
+<button>The app only accepts connections from inside the container. Listen on 0.0.0.0</button>
+<button>The image must be rebuilt without cache</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="node_modules on your Mac holds macOS builds and is large. The image should install its own Linux copy, so keep it out of the build with .dockerignore.">
+<p class="q">5. Why does the Node project put <code>node_modules</code> in <code>.dockerignore</code>?</p>
+<button>Docker cannot copy folders with many files</button>
+<button>Express refuses to start if node_modules is copied</button>
+<button>The image installs its own Linux copy, and the Mac copy is large and built for macOS</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “Walk me through a Dockerfile for a Python app. Why do you copy requirements.txt separately?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>I start <code>FROM</code> a slim official Python image and set a <code>WORKDIR</code>. I copy only <code>requirements.txt</code> first and run <code>pip install</code>, then copy the rest of the code, and finally set <code>CMD</code> to start the app. Each instruction creates a cached layer, and a change in one layer rebuilds everything after it. Dependencies change rarely and code changes often, so installing dependencies before copying code means normal code changes reuse the cached dependency layer and the build takes seconds instead of minutes.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's <a href="https://docs.docker.com/build/building/best-practices/">Building best practices</a>. Read the sections on choosing a base image, <code>.dockerignore</code> and leveraging the build cache (about 10 minutes). Use the <a href="https://docs.docker.com/reference/dockerfile/">Dockerfile reference</a> when you want the exact meaning of an instruction.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “what's the difference between CMD and ENTRYPOINT?”, “why python:3.12-slim and not alpine?”, or paste any build error. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0002-images-layers-registries.html">← Lesson 02: Images, layers &amp; registries</a><span>Next: Ports &amp; persistent data (coming)</span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

@@ -1,0 +1,90 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Images, Layers &amp; Registries</title><link rel="stylesheet" href="../assets/course.css"></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 02 · <a href="../slides/0002-Docker-Images-Layers-Registries.pptx">Slides (PPTX)</a></div>
+<h1>Images, layers &amp; registries</h1>
+<p class="lede">Today's goal: read an image's full name, see the layers inside it, and prove that two images share storage. About 20 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Every deployment finally comes down to one question: “Which image, exactly?” Using the wrong tag, shipping a 1&nbsp;GB image, or pulling from the wrong registry are everyday problems in real projects. If you understand how an image is named and stored, you can find and fix these problems quickly.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>An image name has parts.</b> In lesson 1 you typed only <code>nginx</code>. Docker expanded it to <code>docker.io/library/nginx:latest</code>, which is <em>registry</em> / <em>repository</em> : <em>tag</em>. Docker Hub (<code>docker.io</code>) is the default registry and <code>latest</code> is the default tag. It is like a full postal address: if you skip the city and PIN code, Docker fills in the defaults. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-registry/">[Docker docs]</a></p>
+<p><b>Tags can move. Digests cannot.</b> A tag like <code>nginx:1.27</code> is just a label. The publisher can point it to a newer build tomorrow. A <em>digest</em> (<code>sha256:…</code>) is a hash of the image content, so it always means exactly those bytes. Think of a tag as a class name like “CSE-A”, which gets new students every year, and the digest as one student's roll number, which never changes. Production pipelines often use the digest for this reason. <a href="https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier">[Docker docs]</a></p>
+<p><b>An image is a stack of read-only layers.</b> Each layer is a set of file changes. Images built on the same base share the same layers on disk, and Docker only downloads the layers you don't already have. When a container runs, Docker adds one thin <em>writable</em> layer on top. <a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">[Docker docs]</a></p>
+<p class="aside">A common confusion: <code>latest</code> gives you whatever <code>latest</code> points to on the day you pull. It does not mean “newest version on your machine”, and your copy does not update by itself.</p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Pull a second variant of nginx and compare the sizes:
+<pre><code>docker pull nginx:alpine
+docker images nginx</code></pre>
+The <code>alpine</code> variant is built on Alpine Linux, which is very small. So it should be several times smaller than <code>latest</code>.</li>
+<li>Look inside the layers. Each row is one build step. Some rows add files and some only change settings (these show <code>0B</code>):
+<pre><code>docker image history nginx:alpine</code></pre></li>
+<li>Find the layer hashes and the digest:
+<pre><code>docker image inspect nginx:alpine --format '{{json .RootFS.Layers}}'
+docker images --digests nginx</code></pre></li>
+<li>Pull the base image separately and watch what happens:
+<pre><code>docker pull alpine</code></pre>
+Now compare the first layer of both images:
+<pre><code>docker image inspect alpine --format '{{index .RootFS.Layers 0}}'
+docker image inspect nginx:alpine --format '{{index .RootFS.Layers 0}}'</code></pre>
+If the two hashes match, <code>nginx:alpine</code> is built on the same Alpine base, and that layer is stored only once on your disk. If they don't match, the two tags were built from different Alpine releases. That is a live example of “tags move”.</li>
+<li>Give an image a second name. <code>docker tag</code> only adds a label. It copies no data:
+<pre><code>docker tag nginx:alpine my-nginx:v1
+docker images</code></pre>
+Both rows show the same <em>IMAGE ID</em>. It is one image with two names, like one person with a real name and a hostel nickname.</li>
+<li>Check how much disk space Docker is using:
+<pre><code>docker system df</code></pre></li>
+<li>Clean up. Removing a tag only removes that name. The image data is deleted only when its last name is removed:
+<pre><code>docker rmi my-nginx:v1
+docker rmi nginx:latest</code></pre></li>
+</ol>
+<div class="box"><b>Stretch (needs a free Docker Hub account):</b> run <code>docker login</code>, then <code>docker tag nginx:alpine YOUR-USER/my-nginx:v1</code> and <code>docker push YOUR-USER/my-nginx:v1</code>. Read the output: most layers say <em>Mounted from library/nginx</em> or <em>Layer already exists</em>. The registry also skips layers it already has.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="2" data-explain="No registry means docker.io, an official image name gets library/, and no tag means :latest.">
+<p class="q">1. What is the full name Docker uses for <code>redis</code>?</p>
+<button>redis:stable on your local machine</button>
+<button>hub.docker.com/redis:newest</button>
+<button>docker.io/library/redis:latest</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="A tag is a pointer that can move. A digest identifies exact content, so it can never silently change.">
+<p class="q">2. Your deployment must run exactly the same bytes every time, even months from now. What do you use?</p>
+<button>The image digest, e.g. nginx@sha256:…</button>
+<button>The latest tag, because it's always current</button>
+<button>A version tag like nginx:1.27, which can never change</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Layers are identified by their content and shared. Docker only downloads what is missing.">
+<p class="q">3. You already have <code>alpine</code>. Why does pulling <code>nginx:alpine</code> skip one layer?</p>
+<button>Docker compresses the second pull more aggressively</button>
+<button>That layer is identical to one on disk, so it's reused</button>
+<button>Alpine images are cached by Docker Hub, not locally</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="docker tag adds a name to an existing image ID. Nothing is copied.">
+<p class="q">4. After <code>docker tag nginx:alpine my-nginx:v1</code>, how much extra disk space is used?</p>
+<button>The full size of nginx:alpine again</button>
+<button>Almost none, because it's a second name for the same image</button>
+<button>Only the size of the top layer</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Interview practice (say it out loud or type it): “What are image layers, and why do they make Docker efficient?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>An image is a stack of read-only layers. Each layer is a set of file changes from one build step, identified by a hash of its content. Because of this, images built on the same base share those layers on disk and in registries, so a pull or push only transfers what is missing. A container adds a thin writable layer on top, which is why many containers can start from one image cheaply.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's concept pages <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-registry/">What is a registry?</a> and <a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">Understanding image layers</a>. Each takes about 5 minutes. The layers page shows how a layer gets built, which leads straight into lesson 3.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “why do some history rows say 0B?”, “what does <code>&lt;missing&gt;</code> mean in the IMAGE column?”, or paste any error. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0001-your-first-container.html">← Lesson 01: Your first container</a><a href="0003-write-a-dockerfile.html">Next: Write a Dockerfile →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

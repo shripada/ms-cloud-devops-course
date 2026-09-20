@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docker CLI Cheatsheet</title><link rel="stylesheet" href="../assets/course.css"></head><body><main>
+<div class="kicker">Reference</div><h1>Docker CLI Cheat Sheet</h1>
+<p class="lede">Grows with each lesson. Full list: <a href="https://docs.docker.com/reference/cli/docker/">CLI reference</a>.</p>
+<h2>Containers — lifecycle</h2>
+<table>
+<tr><td><code>docker run -d -p 8080:80 --name web nginx</code></td><td>Create + start in background (<code>-d</code>), publish host 8080 → container 80, name it</td></tr>
+<tr><td><code>docker ps</code> / <code>docker ps -a</code></td><td>List running / all containers (incl. stopped)</td></tr>
+<tr><td><code>docker stop web</code></td><td>Gracefully stop (SIGTERM, then SIGKILL)</td></tr>
+<tr><td><code>docker start web</code></td><td>Start a stopped container again</td></tr>
+<tr><td><code>docker rm web</code></td><td>Delete a stopped container</td></tr>
+<tr><td><code>docker logs web</code></td><td>Show the container's stdout/stderr</td></tr>
+</table>
+<h2>Images</h2>
+<table>
+<tr><td><code>docker images</code></td><td>List local images</td></tr>
+<tr><td><code>docker pull nginx:alpine</code></td><td>Download an image from a registry</td></tr>
+</table>
+<nav class="course"><a href="../index.html">← Course home</a><a href="../lessons/0001-your-first-container.html">Lesson 1 →</a></nav>
+</main></body></html>

@@ -1,0 +1,71 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your First Container</title><link rel="stylesheet" href="../assets/course.css"></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 01 · <a href="../slides/0001-Docker.pptx">Slides (PPTX)</a></div>
+<h1>Your first container</h1>
+<p class="lede">Today's goal: run a real web server in a container, prove that it is “just a process”, and clean it up. About 15 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Almost every company you will join ships its software as containers. In placement interviews for Cloud and DevOps roles, one of the first questions is usually: <em>“What is the difference between an image, a container and a VM?”</em> By the end of this page you can answer it, and you will have actually done it, not just read about it.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Image</b>: a package that contains everything needed to run a program: files, binaries, libraries and config. An image never changes once it is built (it is <em>immutable</em>), and it is made of <em>layers</em>. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">[Docker docs]</a></p>
+<p><b>Container</b>: a running, <em>isolated process</em> started from an image. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">[Docker docs]</a> You studied OOP in college, so think of it this way: the image is the class and the container is the object. One image can give you many containers.</p>
+<p><b>Not a VM</b>: a virtual machine boots a complete operating system with its own kernel. A container does not. All containers <em>share the host's kernel</em>. Remember the OS subject: a process is just a program in execution managed by the kernel. That is why containers start in milliseconds and use very little memory. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">[Docker docs]</a></p>
+<p class="aside">One twist on your Mac: macOS does not have a Linux kernel. So Docker quietly runs a small Linux VM in the background, and your containers share <em>that VM's</em> kernel. <a href="https://docs.docker.com/desktop/">[Docker Desktop docs]</a></p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Start the nginx web server in the background. This connects port 8080 on your Mac to port 80 inside the container:
+<pre><code>docker run -d -p 8080:80 --name web nginx</code></pre>
+You don't have the nginx image yet, so Docker first <em>pulls</em> (downloads) it from Docker Hub. Watch the layers download one by one.</li>
+<li>Open <a href="http://localhost:8080">http://localhost:8080</a> in your browser. You should see “Welcome to nginx!”. Or run <code>curl localhost:8080</code> in the terminal.</li>
+<li>List running containers: <pre><code>docker ps</code></pre></li>
+<li>Prove that it is just processes: <pre><code>docker top web</code></pre> You will see one nginx master process and some worker processes. There is no OS booting up and no init system. It's only nginx.</li>
+<li>Refresh the browser once, then read what nginx has printed: <pre><code>docker logs web</code></pre></li>
+<li>Stop the container, then look again: <pre><code>docker stop web
+docker ps
+docker ps -a</code></pre> <code>docker ps</code> shows only running containers. <code>docker ps -a</code> shows all of them, including stopped ones.</li>
+<li>Delete the container. The <em>image</em> is not deleted, so the next run will not download it again: <pre><code>docker rm web
+docker images</code></pre></li>
+</ol>
+<div class="box"><b>Stretch:</b> run <em>two</em> containers from the same image, one with <code>-p 8081:80 --name a</code> and one with <code>-p 8082:80 --name b</code>. Both work at the same time. That is “one image, many containers”, or one class, many objects. Clean them up after.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="Containers are isolated processes that share the host kernel. They don't have a kernel of their own.">
+<p class="q">1. Which best describes a container?</p>
+<button>A tiny virtual machine that boots its own kernel</button>
+<button>Just a process, isolated, running on the host kernel</button>
+<button>A compressed archive of your code plus its libraries</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="-p HOST:CONTAINER. Your browser runs on the host, so it uses the host side: 8080.">
+<p class="q">2. You ran <code>docker run -d -p 8080:80 nginx</code>. What do you type in your browser?</p>
+<button>localhost:80 because that is the container port</button>
+<button>localhost:8080 because that is the host port</button>
+<button>Either one, Docker maps both directions equally</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="stop is not the same as rm. A stopped container stays until you run docker rm.">
+<p class="q">3. After <code>docker stop web</code>, it's missing from <code>docker ps</code>. Where did it go?</p>
+<button>Deleted forever; you must run the image again</button>
+<button>Stopped but kept; visible with docker ps -a</button>
+<button>Turned back into an image stored on disk</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">4. Interview practice (say it out loud or type it): “What is the difference between an image and a container, and why is a container lighter than a VM?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>An image is an immutable, layered package of everything an app needs. A container is an isolated running process created from that image, and many containers can come from one image. Containers share the host's kernel instead of booting a full OS like a VM, so they are smaller and start almost instantly.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's concept pages <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">What is a container?</a> and <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">What is an image?</a>. Each takes about 5 minutes.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “what did <code>-d</code> actually do?”, “why did it pull several layers?”, or paste any error. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="../index.html">← Course home</a><a href="0002-images-layers-registries.html">Next: Images, layers &amp; registries →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>
