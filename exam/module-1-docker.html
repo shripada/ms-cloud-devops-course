@@ -1,0 +1,108 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Question Bank — Module 1</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Question bank</div>
+<h1>Question bank — Module 1: Docker</h1>
+<p class="lede">University-pattern questions. Each one carries <b>10 marks</b> and has two parts of <b>5 marks</b> each. Write the answer first, on paper, with a timer. Only then open the model answer.</p>
+
+<div class="box"><b>How to use this.</b> Ten marks is roughly 12 minutes of writing. Part (a) is usually “explain”, part (b) is usually “apply” — a command, a Dockerfile or a debugging decision. In the exam, a labelled diagram or a correct command earns marks that a paragraph does not, so draw and write commands wherever the question allows.</div>
+
+<h2>Unit 1 — Containers and images</h2>
+
+<div class="quiz">
+<p class="q">Q1. (10 marks)</p>
+<p><b>(a)</b> Differentiate between a virtual machine and a container with the help of a diagram. <i>(5 marks)</i><br>
+<b>(b)</b> A container started from the <code>nginx</code> image is running. Explain what exactly is “isolated” about it, and state two commands that prove a container is an ordinary process. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> Draw two stacks side by side. VM stack: hardware → host OS → hypervisor → guest OS (with its own kernel) per VM → app. Container stack: hardware → host OS with a single kernel → container runtime → container (app + its libraries) with no guest OS. Points to state: a VM virtualises hardware and boots a full OS with its own kernel; a container virtualises the operating system and shares the host kernel. Consequences: containers start in milliseconds versus minutes, use megabytes instead of gigabytes, and give weaker isolation than a VM because a kernel bug is shared by all containers.</p>
+<p><b>(b)</b> The process is isolated using Linux kernel features: namespaces give it a private view of process IDs, mount points (its own filesystem from the image), network interfaces, hostname and users; cgroups limit how much CPU and memory it may consume. It is <em>not</em> a separate machine — the process is visible from the host. Commands: <code>docker top web</code> lists the container's processes, and <code>docker ps</code>/<code>ps -ef</code> on the host shows the same nginx process. <code>docker logs web</code> simply reads the process's stdout/stderr, which is also evidence it is a plain process.</p>
+</details></div>
+
+<div class="quiz">
+<p class="q">Q2. (10 marks)</p>
+<p><b>(a)</b> “An image is a class and a container is an object.” Justify this statement, and explain why an image is called immutable. <i>(5 marks)</i><br>
+<b>(b)</b> Write the commands to run two containers from the same <code>nginx</code> image on host ports 8081 and 8082, list them, and remove both along with their names. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> An image is a read-only template, like a class definition; a container is a running instance created from it, like an object, with its own writable layer, own process and own state. One image can produce many containers, just as one class can produce many objects. An image is immutable because once built, its layers are fixed and identified by a content digest (SHA-256). Any change — installing a package, editing a file — does not modify the image; it produces a <em>new</em> layer and therefore a new image. What a running container writes goes into a thin writable layer on top, which is discarded when the container is removed.</p>
+<p><b>(b)</b></p>
+<pre><code>docker run -d -p 8081:80 --name a nginx
+docker run -d -p 8082:80 --name b nginx
+docker ps
+docker rm -f a b</code></pre>
+<p>Note <code>-p HOST:CONTAINER</code>: both containers still listen on port 80 internally; only the host port differs, which is why there is no clash. <code>docker rm -f</code> stops and removes in one step; <code>docker stop a b &amp;&amp; docker rm a b</code> is equally acceptable.</p>
+</details></div>
+
+<h2>Unit 2 — Layers and registries</h2>
+
+<div class="quiz">
+<p class="q">Q3. (10 marks)</p>
+<p><b>(a)</b> Explain the layered architecture of a Docker image and the role of the union filesystem. <i>(5 marks)</i><br>
+<b>(b)</b> Two images, <code>app:v1</code> and <code>app:v2</code>, are built from the same base image. Explain, with reference to layers, why pulling the second one is much faster. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> An image is a stack of read-only layers, each layer being the set of filesystem changes produced by one build instruction. A union (overlay) filesystem merges these layers into a single directory tree that the container sees. Files in an upper layer hide files of the same path in a lower layer. When a container runs, a thin writable layer is added on top; modifying an existing file copies it up into that layer first (copy-on-write), leaving the image untouched. Each layer has a content-addressable digest, so identical layers are stored once and shared by every image that uses them.</p>
+<p><b>(b)</b> Pulling downloads layers, not whole images. Since both images share the same base layers and those are already present locally from the first pull, Docker sees the digests already exist and skips them — the output shows “Already exists” for those layers. Only the layers unique to <code>v2</code> (typically the application layer) are transferred. This is also why ordering instructions so that rarely-changing steps come first is valuable: shared, cached layers reduce both pull time and disk usage.</p>
+</details></div>
+
+<div class="quiz">
+<p class="q">Q4. (10 marks)</p>
+<p><b>(a)</b> What is a registry? Distinguish between a repository, a tag and an image digest. <i>(5 marks)</i><br>
+<b>(b)</b> Your team deploys using <code>myapp:latest</code>, and the production server is running different code from the test server. Explain the cause and give a corrected tagging practice with commands. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> A registry is a server that stores and distributes images (Docker Hub, GitHub Container Registry, a private Harbor). A repository is one named collection of related images inside a registry, e.g. <code>library/nginx</code> or <code>shripada/myapp</code>. A tag is a mutable human label on one version within a repository, e.g. <code>nginx:1.27</code>; the default tag is <code>latest</code>. A digest (<code>sha256:…</code>) is the immutable content hash of a specific image; a tag can be moved to point at a new digest, a digest always identifies exactly one image.</p>
+<p><b>(b)</b> Cause: <code>latest</code> is only a label, not a version. It was moved to a newer image after the test server pulled, so the two servers resolved <code>latest</code> to different digests at different times. Correct practice — tag every build with an immutable version and deploy that:</p>
+<pre><code>docker build -t myapp:1.4.2 .
+docker tag myapp:1.4.2 shripada/myapp:1.4.2
+docker push shripada/myapp:1.4.2
+docker pull shripada/myapp@sha256:&lt;digest&gt;   # strictest: pin by digest</code></pre>
+<p>Keep <code>latest</code> as a convenience pointer only, never as the deployment reference.</p>
+</details></div>
+
+<h2>Unit 3 — Dockerfiles</h2>
+
+<div class="quiz">
+<p class="q">Q5. (10 marks)</p>
+<p><b>(a)</b> Explain the purpose of the instructions <code>FROM</code>, <code>WORKDIR</code>, <code>COPY</code>, <code>RUN</code>, <code>EXPOSE</code> and <code>CMD</code>. <i>(5 marks)</i><br>
+<b>(b)</b> Differentiate between <code>RUN</code> and <code>CMD</code>, and between <code>CMD</code> and <code>ENTRYPOINT</code>, with one example each. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> <code>FROM</code> selects the base image and starts a build stage. <code>WORKDIR</code> sets the working directory for the instructions that follow and for the running container, creating it if needed. <code>COPY</code> copies files from the build context into the image. <code>RUN</code> executes a command at build time and commits the result as a new layer. <code>EXPOSE</code> documents the port the application listens on — it does not publish it; <code>-p</code> at run time does that. <code>CMD</code> gives the default command executed when a container starts.</p>
+<p><b>(b)</b> <code>RUN</code> happens once, at build time, and its effect is baked into a layer (<code>RUN npm ci</code>). <code>CMD</code> happens at run time, every time a container starts (<code>CMD ["node","server.js"]</code>), and it is <em>replaced</em> by any command the user appends to <code>docker run</code>. <code>ENTRYPOINT</code> also runs at start-up but is not replaced by user arguments; those arguments are appended to it. So <code>ENTRYPOINT ["ping"]</code> with <code>CMD ["localhost"]</code> makes the image behave like the <code>ping</code> program: <code>docker run img google.com</code> runs <code>ping google.com</code>. Use ENTRYPOINT when the image <em>is</em> one tool, CMD when you want an overridable default.</p>
+</details></div>
+
+<div class="quiz">
+<p class="q">Q6. (10 marks)</p>
+<p><b>(a)</b> Explain build cache and layer ordering. Why is <code>COPY package.json</code> written before <code>COPY . .</code>? <i>(5 marks)</i><br>
+<b>(b)</b> Write a multi-stage Dockerfile for a Node.js application and state two benefits of the multi-stage approach. <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> During a build, Docker checks each instruction against its cache. If the instruction and the files it depends on are unchanged, the cached layer is reused; the first instruction that changes invalidates that layer <em>and every layer after it</em>. Application source changes on almost every build, while dependencies change rarely. Copying only the manifest first, installing dependencies, and copying the source afterwards means an ordinary code edit reuses the cached dependency-install layer, turning a multi-minute build into a few seconds. Writing <code>COPY . .</code> first would invalidate the install layer on every edit.</p>
+<p><b>(b)</b></p>
+<pre><code>FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+EXPOSE 3000
+CMD ["node","dist/server.js"]</code></pre>
+<p>Benefits: (i) the final image contains only runtime files — no compilers, dev dependencies or source — so it is far smaller and faster to pull; (ii) the attack surface shrinks, since build tools that an attacker could use are absent. A third acceptable point: build and runtime environments are defined in one file, with no external build script.</p>
+</details></div>
+
+<h2>Mixed / viva practice</h2>
+<div class="quiz">
+<p class="q">Q7. (10 marks)</p>
+<p><b>(a)</b> A container exits immediately after <code>docker run</code>. List the steps you would follow to diagnose it, naming the command used at each step. <i>(5 marks)</i><br>
+<b>(b)</b> Justify: “<code>docker stop</code> is not the same as <code>docker rm</code>, and removing a container does not remove its image.” <i>(5 marks)</i></p>
+<details><summary>Model answer</summary>
+<p><b>(a)</b> 1. <code>docker ps -a</code> — confirm it exited and read the exit code. 2. <code>docker logs &lt;name&gt;</code> — read stdout/stderr, which usually names the error. 3. <code>docker inspect &lt;name&gt;</code> — check the command actually executed, environment variables and mounts. 4. Re-run interactively with a shell to explore the image: <code>docker run -it --entrypoint sh &lt;image&gt;</code>. 5. Verify the main process runs in the foreground — a container lives only as long as its PID 1, so a daemon started in background mode makes the container exit at once. Typical causes: wrong CMD path, missing config or environment variable, or a process that daemonises itself.</p>
+<p><b>(b)</b> <code>docker stop</code> sends SIGTERM (then SIGKILL after a grace period) to PID 1; the container stops but continues to exist with its writable layer and configuration, visible in <code>docker ps -a</code> and restartable with <code>docker start</code>. <code>docker rm</code> deletes that stopped container and its writable layer permanently. The image is a separate, read-only object stored independently and shared by all containers made from it, so removing a container leaves the image in <code>docker images</code>; it is deleted only by <code>docker rmi</code>.</p>
+</details></div>
+
+<p class="aside">Marks split shown here is the usual pattern: roughly 2 marks for the definition, 2 for the explanation or example, 1 for the diagram, command or a correctly justified conclusion.</p>
+
+<nav class="course"><a href="../index.html">← Course home</a><a href="../reference/glossary.html">Glossary →</a></nav>
+</main></body></html>

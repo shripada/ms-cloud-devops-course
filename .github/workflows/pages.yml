@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir _site
           cp index.html _site/
-          cp -R assets lessons reference slides _site/
+          cp -R assets lessons reference slides exam _site/
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
