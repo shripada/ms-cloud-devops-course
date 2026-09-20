@@ -1,7 +1,7 @@
-# Docker from the ground up
+# DevOps
 
-A practical, beginner-friendly Docker course for aspiring Cloud and DevOps engineers.
-Lessons are plain HTML, CSS and JavaScript — nothing to install.
+A practical, hands-on DevOps course. Module 1 is Docker; Kubernetes, CI/CD and cloud
+deployment follow. Lessons are plain HTML, CSS and JavaScript — nothing to install.
 
 **Read it online:** https://shripada.github.io/ms-cloud-devops-course/
 
