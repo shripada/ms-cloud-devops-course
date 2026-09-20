@@ -1,0 +1,276 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lab 1 — Containerize &amp; Ship</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lab 01 · 3 hours</div>
+<h1>Lab 1 — Containerizing and shipping a full-stack app</h1>
+<p class="lede"><b>Duration:</b> 3 hours. <b>Working mode:</b> pairs. One of you owns the backend, the other owns the frontend, and you swap for the Compose block.</p>
+
+<p>The app is already built and lives in one repository, with <code>backend/</code> and <code>frontend/</code> beside each other: <a href="https://github.com/shripada/ms-cloud-devops-labs">github.com/shripada/ms-cloud-devops-labs</a>. You won't write app code today. The job is to package it, run it, test it, and set up a pipeline that checks it automatically.</p>
+
+<h2>Before you start</h2>
+<p>Do this <em>the night before</em>, not in the lab. Thirty people pulling the same base image at once is how a three-hour lab becomes a two-hour lab.</p>
+<pre><code>docker --version &amp;&amp; docker run hello-world
+node --version                 # 20 or newer
+git --version                  # and check you can log in to GitHub
+
+# pre-pull the base images
+docker pull node:20-alpine
+docker pull nginx:alpine
+
+git clone https://github.com/shripada/ms-cloud-devops-labs</code></pre>
+
+<h2>The plan</h2>
+<table class="schedule">
+<tr><th>Time</th><th>Block</th></tr>
+<tr><td>0:00–0:15</td><td><a href="#b1">Run the app without Docker</a></td></tr>
+<tr><td>0:15–0:50</td><td><a href="#b2">Backend Dockerfile, first attempt</a></td></tr>
+<tr><td>0:50–1:20</td><td><a href="#b3">Backend Dockerfile, better version</a></td></tr>
+<tr><td>1:20–1:35</td><td>Break</td></tr>
+<tr><td>1:35–2:00</td><td><a href="#b4">Frontend Dockerfile</a></td></tr>
+<tr><td>2:00–2:20</td><td><a href="#b5">Docker Compose</a></td></tr>
+<tr><td>2:20–2:50</td><td><a href="#b6">Automated checks with GitHub Actions</a></td></tr>
+<tr><td>2:50–3:00</td><td><a href="#b7">Wrap-up</a></td></tr>
+</table>
+
+<h2 id="b1"><span class="lab-time">0:00–0:15</span> Run the app without Docker</h2>
+<p>Clone the repo. In <code>backend/</code> and then in <code>frontend/</code>, copy <code>.env.example</code> to <code>.env</code>, run <code>npm ci</code>, then <code>npm run dev</code> — two terminals. Open <a href="http://localhost:5173">http://localhost:5173</a> and confirm the header says the API is healthy.</p>
+<p>Write down three things, because you'll need them all day:</p>
+<ol class="steps">
+<li>The Node version each app expects</li>
+<li>The environment variables each one needs</li>
+<li>The port each one listens on</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> you can create and view a note in the running app.</div>
+
+<h2 id="b2"><span class="lab-time">0:15–0:50</span> Backend Dockerfile, first attempt</h2>
+<p>Stop the dev server. In <code>backend/</code>, create a file named <code>Dockerfile</code> and start with the simplest thing that works:</p>
+<pre><code>FROM node:20
+WORKDIR /app
+COPY . .
+RUN npm install
+RUN npm run build
+EXPOSE 3000
+CMD ["node", "dist/server.js"]</code></pre>
+<p>Build it, run it, and hit the health endpoint:</p>
+<pre><code>docker build -t backend:v1 .
+docker run --rm -p 3000:3000 backend:v1
+curl localhost:3000/health</code></pre>
+<p>What each instruction does:</p>
+<table>
+<tr><td><code>FROM</code></td><td>picks the base image everything else is layered on</td></tr>
+<tr><td><code>WORKDIR</code></td><td>sets the directory for every command after it</td></tr>
+<tr><td><code>COPY</code></td><td>moves files from your machine into the image</td></tr>
+<tr><td><code>RUN</code></td><td>executes a command at build time; the result is saved into the image</td></tr>
+<tr><td><code>EXPOSE</code></td><td>documents the port. It doesn't publish anything — <code>-p</code> does that</td></tr>
+<tr><td><code>CMD</code></td><td>the default command when the container starts</td></tr>
+</table>
+<p><code>ENTRYPOINT</code> is similar to <code>CMD</code>, but it's meant to be the fixed executable, with <code>CMD</code> supplying default arguments. For a Node app, <code>CMD</code> is usually enough.</p>
+<p>Now measure two things and write them down — the next block has no punchline without them:</p>
+<ol class="steps">
+<li>Image size: <code>docker images backend:v1</code></li>
+<li>Rebuild time after changing one line of source. Edit a file, run <code>docker build</code> again, and time it.</li>
+</ol>
+
+<h2 id="b3"><span class="lab-time">0:50–1:20</span> Backend Dockerfile, better version</h2>
+<p>The first version is slow to rebuild and much larger than it needs to be. Five changes fix that.</p>
+
+<p><b>1. Add a <code>.dockerignore</code></b> so junk never enters the build:</p>
+<pre><code>node_modules
+dist
+.git
+.env
+data
+*.log</code></pre>
+
+<p><b>2. Order layers by how often they change.</b> Docker caches each layer and reuses it until something above it changes. Dependencies change rarely and your code changes constantly, so install dependencies first:</p>
+<pre><code>COPY package*.json ./
+RUN npm ci
+COPY . .</code></pre>
+<p><code>npm ci</code> installs exactly what the lockfile says, which is what you want in a build.</p>
+
+<p><b>3. Use a multi-stage build.</b> Compile TypeScript in one stage and ship only the output in another, so the compiler and dev dependencies never reach the final image. <b>4. Run as a non-root user</b> — if someone exploits the app, they don't get root inside the container. <b>5. Add a <code>HEALTHCHECK</code></b> so Docker can tell “the process is running” apart from “the app is actually answering”.</p>
+<pre><code>FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+# The API writes notes into ./data. Root owns /app, so hand that one directory
+# to the user we are about to become.
+RUN mkdir -p /app/data &amp;&amp; chown -R node:node /app/data
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+CMD ["node", "dist/server.js"]</code></pre>
+
+<div class="trap"><b>Trap 1 — the data directory.</b> Miss the <code>chown</code> line and the container exits at startup with <code>EACCES: permission denied, mkdir '/app/data'</code>. Root owns <code>/app</code>, and <code>USER node</code> is not root. Read that error rather than pasting the fix: it is the whole permissions lesson in one line.</div>
+
+<div class="trap"><b>Trap 2 — <code>localhost</code> in the healthcheck.</b> Use <code>127.0.0.1</code>, not <code>localhost</code>. Inside the container <code>localhost</code> resolves to the IPv6 address <code>::1</code> first, the app listens on IPv4, and the check fails with “connection refused” while the app is perfectly fine. Your container sits there marked <code>unhealthy</code> and Compose refuses to start anything that depends on it.</div>
+
+<p>Build it as <code>backend:v2</code> and compare against your v1 numbers. Change one line of source and rebuild — it should now take seconds, because the dependency layers come from cache. Run <code>docker ps</code> after a minute and look for <code>healthy</code> in the status column.</p>
+<div class="checkpoint"><b>Checkpoint:</b> v2 is far smaller than v1 (expect roughly 1.7 GB → 200 MB), a code-only rebuild is fast, and the status says healthy.</div>
+
+<h2><span class="lab-time">1:20–1:35</span> Break</h2>
+<p>If your builds are still running, let them finish.</p>
+
+<h2 id="b4"><span class="lab-time">1:35–2:00</span> Frontend Dockerfile</h2>
+<p>Same idea, with one difference. A frontend is just static files once it's built, so you don't need Node at runtime. You need a web server.</p>
+<pre><code>FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+ARG API_URL
+ENV VITE_API_URL=$API_URL
+RUN npm run build
+
+FROM nginx:alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80</code></pre>
+<p>Two things to understand here:</p>
+<p><b>Build-time vs runtime configuration.</b> The API URL gets baked into the JavaScript bundle when you run <code>npm run build</code>. Changing an environment variable on a running container won't change it. That's why it's an <code>ARG</code> passed with <code>docker build --build-arg API_URL=...</code>. Try building with a wrong URL and watch what breaks in the browser.</p>
+<p><b>SPA routing.</b> Open a note so the URL becomes <code>/notes/&lt;id&gt;</code>, then refresh. nginx looks for a file with that name and returns 404. The <code>nginx.conf</code> in the repo ships without the fix on purpose — one line repairs it:</p>
+<pre><code>location / {
+  try_files $uri $uri/ /index.html;
+}</code></pre>
+<div class="checkpoint"><b>Checkpoint:</b> the frontend loads from a container on port 8080 (<code>-p 8080:80</code>), and refreshing a note page returns 200, not 404.</div>
+
+<h2 id="b5"><span class="lab-time">2:00–2:20</span> Docker Compose</h2>
+<p>Right now you're starting two containers by hand with long commands. <b>Swap roles with your partner</b>, then write a <code>docker-compose.yml</code> at the repo root that starts both:</p>
+<pre><code>services:
+  backend:
+    build: ./backend
+    environment:
+      PORT: 3000
+      DATA_FILE: /app/data/notes.json
+      CORS_ORIGIN: http://localhost:8080
+    volumes:
+      - notes-data:/app/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        API_URL: http://localhost:3000
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  notes-data:</code></pre>
+<p>Run it with <code>docker compose up --build</code>. Points to notice:</p>
+<ul>
+<li>Compose puts both services on one network, and each is reachable by its <em>service name</em>. Containers talk to each other as <code>backend:3000</code>, not <code>localhost</code>.</li>
+<li>The browser runs on your machine, not in a container, so the frontend's API URL still has to be something your browser can reach.</li>
+<li><code>depends_on</code> with <code>service_healthy</code> waits for the healthcheck to pass, not just for the container to start.</li>
+<li>Set the variables inline rather than with <code>env_file</code>: <code>.env</code> is gitignored, your partner's checkout doesn't have one, and Compose fails outright when the file is missing.</li>
+</ul>
+<p><b>The volume experiment.</b> Create a note, then:</p>
+<pre><code>docker compose down     # stop everything
+docker compose up -d    # your note is still there
+docker compose down -v  # -v also deletes the named volume
+docker compose up -d    # the note is gone</code></pre>
+<p>That single letter is the whole volumes lesson. Data that matters lives in a volume, never inside the container.</p>
+<div class="checkpoint"><b>Checkpoint:</b> <code>docker compose up</code> brings up the whole app, and <code>docker compose down</code> cleans it up.</div>
+
+<h2 id="b6"><span class="lab-time">2:20–2:50</span> Automated checks with GitHub Actions</h2>
+<p>Everything you've run by hand can run automatically on every push. The rule is that the pipeline runs the same commands you'd run locally. If CI does something you can't reproduce on your laptop, you can't debug it.</p>
+<p>Create <code>.github/workflows/ci.yml</code>:</p>
+<pre><code>name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:int
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t notes-backend:${{ github.sha }} ./backend</code></pre>
+<p>The order matters. Lint is fastest, so it fails first. Unit tests come next, then integration tests, which are slower because they exercise the real app. The Docker build only runs if all of that passes — there's no point packaging code that's already broken, and <code>needs: test</code> enforces it.</p>
+<p>Now the exercise:</p>
+<ol class="steps">
+<li>Push the workflow and watch the run in the <b>Actions</b> tab. It should be green.</li>
+<li>Check out the <code>lab/ci-broken</code> branch. It has a lint error and a real bug planted in it. Push it, watch the pipeline go red, and notice that lint fails first so the Docker build never even starts.</li>
+<li>Open the failed step, read the log, fix both, push again and confirm it goes green.</li>
+<li>Add one small test of your own.</li>
+</ol>
+<p>If you finish early, push the built image to GitHub Container Registry (GHCR) at the end of the pipeline.</p>
+
+<h2 id="b7"><span class="lab-time">2:50–3:00</span> Wrap-up</h2>
+<p>Before you leave, you should be able to answer these without looking:</p>
+<div class="quiz recall">
+<p class="q">1. Why does the order of <code>COPY</code> and <code>RUN</code> lines change build speed?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>Each instruction becomes a cached layer, and the first instruction whose inputs change invalidates that layer and every layer below it. Copying the manifest and installing dependencies before copying source means an ordinary code edit reuses the cached install layer.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">2. What does a multi-stage build remove from the final image?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The build stage's contents: compilers, dev dependencies and source. Only the compiled output is copied forward, so the image is smaller and has a smaller attack surface.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">3. Why can't you change the frontend's API URL on a running container?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>Vite substitutes <code>VITE_API_URL</code> into the JavaScript bundle during <code>npm run build</code>. By the time the container runs, it is a literal string in a static file, so a runtime environment variable has nothing to change.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">4. Why does the pipeline run lint before the Docker build?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>Fail fast and cheap. Lint takes seconds and catches trivial errors; the image build takes minutes. There is no value in packaging code already known to be broken.</p></details>
+</div>
+
+<h2>Common mistakes</h2>
+<ul>
+<li>Forgetting <code>.dockerignore</code>, so <code>node_modules</code> gets copied in and overwrites the clean install</li>
+<li>Using <code>localhost</code> between containers instead of the service name, or <code>localhost</code> in a healthcheck where <code>127.0.0.1</code> is meant</li>
+<li>Using <code>npm install</code> where <code>npm ci</code> belongs</li>
+<li>Committing <code>.env</code> files</li>
+<li>Tagging everything <code>latest</code>, so you can't tell which build is which</li>
+</ul>
+
+<h2>Take-home tasks</h2>
+<ol class="steps">
+<li>Add a Postgres service to your Compose file with a named volume, and see what happens to your data on <code>docker compose down</code> versus <code>down -v</code>.</li>
+<li>Scan your image with <code>docker scout quickview</code> or Trivy and read what it reports.</li>
+<li>Tag images with the git commit SHA and push them to GHCR from the pipeline.</li>
+</ol>
+
+<div class="box">🆘 <b>Falling behind?</b> Every stage has a checkpoint branch — <code>checkpoint/1-backend-v1</code> through <code>checkpoint/5-ci</code>. Check out the one for the stage you're on, compare it with your own work, and keep going. Reading a working version and diffing it against yours is a legitimate way to learn, not cheating.</div>
+
+<nav class="course"><a href="../index.html">← Course home</a><a href="../exam/module-1-docker.html">Question bank →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

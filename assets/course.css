@@ -81,3 +81,14 @@ nav.course{border-top:1px solid var(--rule);margin-top:3em;padding-top:1em;font-
 .home .theme-toggle:hover{color:var(--ink);border-color:var(--blue)}
 @media (max-width:700px){.theme-toggle{top:8px;right:8px;padding:6px 9px}.theme-toggle .label{display:none}}
 @media print{.theme-toggle{display:none}}
+
+/* Lab pages */
+.lab-time{display:inline-block;font:600 .68rem "JetBrains Mono",monospace;letter-spacing:.06em;
+  background:var(--code-bg);color:var(--muted);border:1px solid var(--rule);border-radius:99px;padding:3px 9px;vertical-align:middle;margin-right:8px}
+h2 .lab-time{margin-bottom:2px}
+.checkpoint{border-left:3px solid var(--ok);background:var(--code-bg);border-radius:0 6px 6px 0;
+  padding:10px 14px;margin:1.2em 0;font-size:.93rem}
+.checkpoint b{color:var(--ok)}
+.schedule td:first-child{font:600 .78rem "JetBrains Mono",monospace;white-space:nowrap;color:var(--muted)}
+.trap{border:1px solid var(--bad);border-radius:8px;padding:12px 16px;margin:1.2em 0;font-size:.94rem}
+.trap b{color:var(--bad)}
