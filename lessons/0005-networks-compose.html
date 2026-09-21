@@ -1,0 +1,170 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Networks &amp; Compose</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 05 · Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0004-Docker-Volumes-Networks-Compose-Classroom.pptx" target="_blank" rel="noopener">view</a> · <a href="../slides/0004-Docker-Volumes-Networks-Compose-Classroom.pptx" download>download</a></div>
+<h1>Networks &amp; Compose</h1>
+<p class="lede">Today's goal: make containers talk to each other by name, then run a two-container app (a Flask web app and a Redis database) with a single command. About 40 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Real apps are never one container. There is at least an app and a database, often a cache and a background worker too. Typing four long <code>docker run</code> commands in the right order, with the right network and volume flags, is slow and easy to get wrong. Docker Compose writes the whole setup down in one file that lives in Git next to the code. On your first day in a company, “clone the repo and run <code>docker compose up</code>” is very often step one. Kubernetes files in module 2 will look familiar because of today.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Containers on the same user-defined network find each other by name.</b> You create a network with <code>docker network create</code> and attach containers to it. Docker runs a small DNS server for that network, so a container called <code>redis</code> is reachable at the hostname <code>redis</code>. You never hard-code an IP address. IPs change every time a container is recreated; names don't. <a href="https://docs.docker.com/engine/network/">[Docker docs: networking]</a></p>
+<p><b><code>localhost</code> inside a container means that container only.</b> This is the most common beginner bug. If your web container connects to <code>localhost:6379</code>, it is looking for Redis <em>inside itself</em>, and finds nothing. It must use the other container's name. It is the same idea as the <code>127.0.0.1</code> problem from lesson 3, seen from the other side.</p>
+<p><b>A Compose file describes the whole app.</b> <code>compose.yaml</code> lists the <em>services</em> (containers), their images or build folders, ports, environment variables and volumes. <code>docker compose up</code> creates a network for the app, puts every service on it, and starts everything. <code>docker compose down</code> removes it all again. <a href="https://docs.docker.com/compose/">[Docker docs: Compose]</a></p>
+<p class="aside">College analogy: a network is a hostel's internal phone system. You dial “Room Ravi”, not a number that changes every semester. A Compose file is the hostel's allotment list: who stays in which room, and what each room needs, written down once so the warden doesn't have to remember it.</p>
+
+<h2>Do it: talk by name</h2>
+<ol class="steps">
+<li>Create a network and start nginx on it, with the name <code>canteen</code>:
+<pre><code>docker network create campus
+docker run -d --name canteen --network campus nginx:alpine</code></pre></li>
+<li>Start a throwaway container on the same network and fetch the page using only the name:
+<pre><code>docker run --rm --network campus alpine wget -qO- http://canteen | head -4
+docker run --rm --network campus alpine ping -c1 canteen</code></pre>
+The name <code>canteen</code> turns into an IP like <code>172.18.0.2</code>. No <code>-p</code> needed: <code>-p</code> is only for traffic coming from your Mac. Containers on one network reach each other directly. If you get <code>Connection refused</code>, nginx was still starting. Wait a second and try again.</li>
+<li>Now try from a container that is <em>not</em> on the network:
+<pre><code>docker run --rm alpine wget -qO- -T 3 http://canteen</code></pre>
+You get <code>bad address 'canteen'</code>. Outside the network, the name means nothing. This is also a basic security idea: only the containers you put on the network can reach each other.</li>
+<li>Clean up:
+<pre><code>docker rm -f canteen
+docker network rm campus</code></pre></li>
+</ol>
+
+<h2>Do it: a two-service app with Compose</h2>
+<ol class="steps">
+<li>Make a folder:
+<pre><code>mkdir visits &amp;&amp; cd visits</code></pre></li>
+<li>Create <code>app.py</code>, a page that counts its visits in Redis:
+<pre><code>import os
+from flask import Flask
+from redis import Redis
+
+app = Flask(__name__)
+redis = Redis(host=os.environ.get("REDIS_HOST", "localhost"), port=6379)
+
+@app.route("/")
+def home():
+    count = redis.incr("visits")
+    return f"This page has been visited {count} times.\n"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)</code></pre>
+The Redis hostname comes from an environment variable, so the same code runs anywhere. Redis is a very fast in-memory database, often used for counters, caches and login sessions.</li>
+<li>Create <code>requirements.txt</code>:
+<pre><code>flask==3.1.*
+redis==6.*</code></pre></li>
+<li>Create the <code>Dockerfile</code>. It is the same one you wrote in lesson 3:
+<pre><code>FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+CMD ["python", "app.py"]</code></pre></li>
+<li>Create <code>compose.yaml</code>. Indentation matters in YAML: use spaces, never tabs.
+<pre><code>services:
+  web:
+    build: .
+    ports:
+      - "8000:5000"
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:</code></pre>
+Line by line:
+<ul>
+<li><code>web</code> and <code>redis</code>: the two services. Each service name is also its hostname on the network.</li>
+<li><code>build: .</code>: build the web image from the Dockerfile in this folder. <code>redis</code> uses a ready-made image instead.</li>
+<li><code>ports</code>: the same <code>HOST:CONTAINER</code> rule as <code>-p</code> in lesson 4. Only <code>web</code> is published. Redis stays private.</li>
+<li><code>environment</code>: tells the app that Redis lives at the hostname <code>redis</code>.</li>
+<li><code>depends_on</code>: start <code>redis</code> before <code>web</code>. It only waits for the container to <em>start</em>, not for Redis to be fully ready.</li>
+<li><code>volumes</code>: a named volume, exactly like <code>pgdata</code> in lesson 4, so the count survives.</li>
+</ul></li>
+<li>Start everything. <code>-d</code> runs it in the background, <code>--build</code> builds the web image first:
+<pre><code>docker compose up -d --build
+curl localhost:8000
+curl localhost:8000</code></pre>
+The count goes up: 1, then 2. Two containers, talking by name, from one command.</li>
+<li>Look at what Compose made for you:
+<pre><code>docker compose ps
+docker network ls
+docker compose logs web</code></pre>
+You see a network called <code>visits_default</code>. Compose named it after the folder and put both services on it. <code>logs</code> shows each of your <code>curl</code> requests.</li>
+<li>Take the whole app down and bring it back:
+<pre><code>docker compose down
+docker compose up -d
+curl localhost:8000</code></pre>
+<code>down</code> removed both containers and the network, but the count continues at 3. The volume kept it.</li>
+<li>Clean up everything, including the volume this time:
+<pre><code>docker compose down -v
+cd ..</code></pre>
+<code>-v</code> also deletes the named volumes. Never type it casually on a real database.</li>
+</ol>
+
+<div class="box"><b>Stretch:</b> change <code>REDIS_HOST: redis</code> to <code>REDIS_HOST: localhost</code>, run <code>docker compose up -d</code> and <code>curl localhost:8000</code>. You get a server error. Read <code>docker compose logs web</code> and find <code>Connection refused</code>. That is idea 2, happening for real. Change it back. For a second stretch, add a third service <code>adminer</code> or a second copy of <code>web</code> on port 8001 and check that both share the same counter.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="Inside a container, localhost is that container itself. Use the service or container name on the shared network.">
+<p class="q">1. Your web container connects to Redis at <code>localhost:6379</code> and gets “connection refused”. Redis is running in another container on the same network, named <code>redis</code>. The fix?</p>
+<button>Add -p 6379:6379 to the Redis container</button>
+<button>Connect to redis:6379 instead of localhost:6379</button>
+<button>Put both apps into one container</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="Container IPs change when containers are recreated. Docker's built-in DNS maps names to the current IP.">
+<p class="q">2. Why should apps use container names, not IP addresses like 172.18.0.2?</p>
+<button>IP addresses are slower than names</button>
+<button>Docker blocks direct IP traffic between containers</button>
+<button>The IP can change when a container is recreated; the name stays the same</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Containers on the same network reach each other directly. -p only publishes a port to the host.">
+<p class="q">3. In the Compose file, Redis has no <code>ports</code> section. Can <code>web</code> still reach it?</p>
+<button>Yes. ports only matter for traffic from your Mac; services on the network reach each other directly</button>
+<button>No. Every service needs ports to be reachable</button>
+<button>Only if depends_on is removed</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="depends_on controls start order only. For readiness you use a healthcheck with condition: service_healthy, or retry logic in the app.">
+<p class="q">4. <code>depends_on: [redis]</code> is set. What does Compose guarantee?</p>
+<button>The web app starts only after Redis is fully ready to accept connections</button>
+<button>The Redis container is started before the web container</button>
+<button>Web restarts automatically if Redis crashes</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="docker compose down removes containers and networks but keeps named volumes. Adding -v deletes the volumes too.">
+<p class="q">5. After <code>docker compose down</code> and <code>up</code>, the visit count continued from where it stopped. Which command would have reset it?</p>
+<button>docker compose restart</button>
+<button>docker compose stop</button>
+<button>docker compose down -v</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “Your app and database run in separate containers. How do they find each other, and why would you use Docker Compose?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>I put both containers on the same user-defined network. Docker provides built-in DNS on that network, so the app reaches the database by its container or service name, like <code>db:5432</code>, instead of a changing IP. Inside a container <code>localhost</code> means the container itself, so that won't work. Only the service users need, like the web app, gets a published port; the database stays private on the network. Compose describes all of this in one version-controlled <code>compose.yaml</code>: services, images or build contexts, ports, environment variables, volumes and start order. One <code>docker compose up</code> creates the network and starts everything, so every developer gets the same setup, and <code>docker compose down</code> cleans it up.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's <a href="https://docs.docker.com/compose/gettingstarted/">Compose quickstart</a> (about 15 minutes). It builds almost this exact app, then adds live code reloading with a bind mount. Also read <a href="https://docs.docker.com/compose/how-tos/networking/">Networking in Compose</a>. Keep the <a href="https://docs.docker.com/reference/compose-file/">Compose file reference</a> handy for every key.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../exam/module-1-docker.html">Question bank</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how do I make web wait until Redis is really ready?”, “how do I keep passwords out of compose.yaml?”, or paste any YAML error. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0004-ports-persistent-data.html">← Lesson 04: Ports &amp; persistent data</a><a href="0006-debug-broken-containers.html">Next: Debug broken containers →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

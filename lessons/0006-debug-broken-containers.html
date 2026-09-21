@@ -1,0 +1,174 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Debug Broken Containers</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 06</div>
+<h1>Debug broken containers</h1>
+<p class="lede">Today's goal: break four containers on purpose and fix each one with the same four-step method: status, logs, inspect, exec. About 40 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Writing a Dockerfile is maybe 20% of the job. The other 80% is the call that says “the container keeps crashing” or “the site is not opening”. A DevOps engineer is the person who calmly finds out why. Interviewers love this topic because it shows whether you have actually used Docker or only read about it. “A container exits right after starting. How do you debug it?” is one of the most common questions you will get.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Always follow the same order: status → logs → inspect → exec.</b> Don't guess, and don't rebuild blindly. Like a doctor: first check if the patient is breathing (<code>docker ps -a</code>), then ask what happened (<code>docker logs</code>), then read the full report (<code>docker inspect</code>), and only then go inside (<code>docker exec</code>). Nine times out of ten, the logs already tell you the answer.</p>
+<p><b>A container lives only as long as its main process.</b> In your OS course you learnt that every process has a PID and an exit code. The command in <code>CMD</code> runs as PID 1 inside the container. When it ends, for any reason, the container stops. So “my container keeps exiting” really means “my main process keeps ending”, and the <em>exit code</em> tells you how it ended. <a href="https://docs.docker.com/reference/cli/docker/container/run/#exit-status">[Docker docs: exit status]</a></p>
+<p><b>Exit codes are clues.</b> Learn these few:</p>
+<ul>
+<li><code>0</code>: the process finished normally. Nothing crashed. It simply had no more work to do.</li>
+<li><code>1</code>, <code>2</code> and similar small numbers: the app itself reported an error. Read the logs.</li>
+<li><code>125</code>: <code>docker run</code> itself failed, for example a bad flag or name. The container never started.</li>
+<li><code>126</code> / <code>127</code>: the command in <code>CMD</code> could not be run, or was not found.</li>
+<li><code>137</code>: the process was killed (128 + signal 9). Often it ran out of memory.</li>
+</ul>
+<p class="aside">Railway analogy: <code>docker ps -a</code> is the IRCTC status board telling you the train has stopped. <code>docker logs</code> is the guard's diary. <code>docker inspect</code> is the full technical report of the train. <code>docker exec</code> is walking into the coach yourself. You read the board and the diary before you walk down the track.</p>
+
+<h2>The toolkit</h2>
+<pre><code>docker ps -a                        # every container, including stopped ones, with status
+docker logs NAME                    # everything the app printed (add -f to keep following)
+docker inspect NAME                 # full details as JSON: state, exit code, ports, env, mounts
+docker inspect -f '{{.State.ExitCode}}' NAME   # pick out one field
+docker exec -it NAME sh             # open a shell inside a RUNNING container
+docker port NAME                    # the port forwarding rules
+docker stats                        # live CPU and memory use</code></pre>
+<p>The official reference for each is in the <a href="https://docs.docker.com/reference/cli/docker/">Docker CLI reference</a>.</p>
+
+<h2>Case 1: the database that won't stay up</h2>
+<ol class="steps">
+<li>Start Postgres the way a hurried teammate might:
+<pre><code>docker run -d --name db postgres:17</code></pre>
+Docker happily prints a container ID. It looks fine.</li>
+<li><b>Status.</b> Check whether it is running:
+<pre><code>docker ps
+docker ps -a</code></pre>
+<code>docker ps</code> shows nothing. <code>docker ps -a</code> shows <code>Exited (1)</code>. The container started and died within a second.</li>
+<li><b>Logs.</b> Ask it why:
+<pre><code>docker logs db</code></pre>
+<code>Error: Database is uninitialized and superuser password is not specified.</code> The image even tells you the fix: <code>-e POSTGRES_PASSWORD=...</code>. Solved in one step.</li>
+<li>Fix it and clean up:
+<pre><code>docker rm db
+docker run -d --name db -e POSTGRES_PASSWORD=secret postgres:17
+docker ps
+docker rm -f db</code></pre></li>
+</ol>
+
+<h2>Case 2: the app with a typo</h2>
+<ol class="steps">
+<li>Make a folder with an app and a Dockerfile that has a mistake in it:
+<pre><code>mkdir broken-app &amp;&amp; cd broken-app
+echo 'print("Hello from the quiz app")' &gt; app.py
+cat &gt; Dockerfile &lt;&lt;'EOF'
+FROM python:3.12-slim
+WORKDIR /app
+COPY . .
+CMD ["python", "main.py"]
+EOF
+docker build -t broken-app .</code></pre>
+The build succeeds. Docker does not check that <code>main.py</code> exists, because <code>CMD</code> only runs later (remember lesson 3).</li>
+<li>Run it and read the clues:
+<pre><code>docker run --name quiz-app broken-app
+docker ps -a --filter name=quiz-app
+docker logs quiz-app</code></pre>
+Status is <code>Exited (2)</code>, and the log says <code>can't open file '/app/main.py'</code>.</li>
+<li>You can't <code>exec</code> into a stopped container. Instead, start a new throwaway container from the same image and run a different command in place of <code>CMD</code>:
+<pre><code>docker run --rm broken-app ls</code></pre>
+It lists <code>Dockerfile</code> and <code>app.py</code>. There is no <code>main.py</code>. Anything you write after the image name replaces <code>CMD</code>, which makes this a very handy trick for looking inside any image.</li>
+<li>Fix the <code>CMD</code> to use <code>app.py</code>, rebuild and run again:
+<pre><code>docker rm quiz-app
+docker build -t broken-app .
+docker run --rm broken-app
+cd ..</code></pre></li>
+</ol>
+
+<h2>Case 3: running, but the page won't open</h2>
+<ol class="steps">
+<li>Start nginx with a port mistake:
+<pre><code>docker run -d --name web -p 8080:8080 nginx:alpine
+curl localhost:8080</code></pre>
+<code>Connection reset by peer</code>. But <code>docker ps</code> says the container is <code>Up</code>. So the process is fine, and the problem is the path to it.</li>
+<li><b>Inspect.</b> Check the forwarding rule:
+<pre><code>docker port web</code></pre>
+<code>8080/tcp -&gt; 0.0.0.0:8080</code>. Docker is forwarding to port <em>8080</em> inside the container.</li>
+<li><b>Exec.</b> Go inside and test from there, where port publishing does not matter:
+<pre><code>docker exec web wget -qO- 127.0.0.1:8080
+docker exec web wget -qO- 127.0.0.1:80 | head -4</code></pre>
+8080 is refused, 80 works. nginx listens on 80. The fix is <code>-p 8080:80</code>. Testing from inside the container splits the problem in half: if it works inside but not outside, the app is fine and the port mapping is wrong.</li>
+<li>Explore while you are in. Open a real shell, look around, then leave:
+<pre><code>docker exec -it web sh
+ps
+env
+ls /usr/share/nginx/html
+exit</code></pre>
+<code>ps</code> shows only nginx's own processes. That is lesson 7's topic.</li>
+<li>Fix and clean up:
+<pre><code>docker rm -f web
+docker run -d --name web -p 8080:80 nginx:alpine
+curl -s localhost:8080 | head -4
+docker rm -f web</code></pre></li>
+</ol>
+
+<h2>Case 4: killed without a single error</h2>
+<ol class="steps">
+<li>Give a container only 20 MB of memory, then ask Python for 200 MB:
+<pre><code>docker run --name hungry -m 20m python:3.12-slim \
+  python -c "x = bytearray(200 * 1024 * 1024)"</code></pre>
+It stops with no Python error at all. The logs are empty too. This is the hardest kind of crash.</li>
+<li><b>Inspect</b> the state:
+<pre><code>docker inspect -f '{{.State.ExitCode}} {{.State.OOMKilled}}' hungry</code></pre>
+<code>137 true</code>. Exit code 137 and <code>OOMKilled</code> (out of memory) true: the kernel killed it for using more than its limit. When the logs are silent, <code>inspect</code> still knows. You will meet this exact situation in Kubernetes as <code>OOMKilled</code>.</li>
+<li>Clean up:
+<pre><code>docker rm hungry</code></pre></li>
+</ol>
+
+<div class="box"><b>Stretch:</b> run <code>docker run -d --name quick alpine echo hello</code>, then <code>docker ps -a</code>. It shows <code>Exited (0)</code>. Nothing crashed: <code>echo</code> finished, so PID 1 ended, so the container stopped. Beginners often think this is a bug. Now go back to lesson 5's <code>visits</code> app, change <code>REDIS_HOST</code> to a wrong name, and debug it with only <code>docker compose ps</code>, <code>docker compose logs</code> and <code>docker compose exec web sh</code>. The Compose commands work like the ones you learnt today.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="docker ps only lists running containers. Stopped ones need -a, and then docker logs tells you why it stopped.">
+<p class="q">1. You ran <code>docker run -d myapp</code>, but <code>docker ps</code> shows nothing. What should you do first?</p>
+<button>Rebuild the image with --no-cache</button>
+<button>Run docker ps -a to see its status, then docker logs</button>
+<button>Restart Docker Desktop</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="137 = 128 + 9: the process got SIGKILL. With OOMKilled true, the kernel killed it for going over its memory limit.">
+<p class="q">2. A container exited with code 137 and <code>OOMKilled: true</code>. What happened?</p>
+<button>It used more memory than its limit, and the kernel killed it</button>
+<button>The CMD file was not found</button>
+<button>It finished its work normally</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="docker exec only works on running containers. Starting a new container from the same image with a different command, like ls or sh, lets you look inside.">
+<p class="q">3. A container exits immediately, so <code>docker exec</code> fails. How can you look at the files inside the image?</p>
+<button>docker logs --files NAME</button>
+<button>docker exec -it NAME sh --force</button>
+<button>docker run --rm -it IMAGE sh (a new container with a different command)</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="If the app answers inside the container but not from the host, the app is healthy and the port mapping or listen address is the problem.">
+<p class="q">4. <code>curl localhost:8080</code> fails from your Mac, but inside the container <code>wget 127.0.0.1:80</code> works. Where is the problem?</p>
+<button>The app is crashing</button>
+<button>In the port mapping. Check -p against the port the app really listens on</button>
+<button>The image is corrupted</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="A container stops when its main process ends. Exit code 0 means it ended normally: it had nothing more to do.">
+<p class="q">5. <code>docker ps -a</code> shows <code>Exited (0)</code> for a container that ran a short script. Is something broken?</p>
+<button>No. The main process finished normally, so the container stopped</button>
+<button>Yes. Exit code 0 means Docker crashed</button>
+<button>Yes. Containers should never stop by themselves</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “A container exits right after it starts. Walk me through how you debug it.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>A container runs only as long as its main process, so I'm finding out why that process ended. First <code>docker ps -a</code> to see the status and exit code. Then <code>docker logs</code>, which usually shows the error directly, like a missing environment variable or a file not found. If the logs are empty I use <code>docker inspect</code> to check the exit code, <code>OOMKilled</code>, the command, environment variables and mounts. Exit code 137 with OOMKilled means it hit the memory limit; 126 or 127 means the command couldn't be run or found; 0 means it simply finished, for example because the command runs in the background instead of the foreground. Since I can't exec into a stopped container, I start a new one from the same image with <code>docker run --rm -it IMAGE sh</code> and check the files and the command by hand. Then I fix the Dockerfile or the run command and rebuild.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Docker CLI reference pages for <a href="https://docs.docker.com/reference/cli/docker/container/logs/">docker logs</a>, <a href="https://docs.docker.com/reference/cli/docker/container/exec/">docker exec</a> and <a href="https://docs.docker.com/reference/cli/docker/inspect/">docker inspect</a> (about 10 minutes total). Look especially at the examples on each page.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../exam/module-1-docker.html">Question bank</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “the image has no shell, how do I debug it?”, “what is the difference between docker attach and docker exec?”, or paste any error and your <code>docker ps -a</code> output. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0005-networks-compose.html">← Lesson 05: Networks &amp; Compose</a><span>Next: Under the hood (coming)</span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

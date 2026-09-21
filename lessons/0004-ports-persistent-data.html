@@ -1,0 +1,146 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ports &amp; Persistent Data</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 04 · Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0004-Docker-Volumes-Networks-Compose-Classroom.pptx" target="_blank" rel="noopener">view</a> · <a href="../slides/0004-Docker-Volumes-Networks-Compose-Classroom.pptx" download>download</a></div>
+<h1>Ports &amp; persistent data</h1>
+<p class="lede">Today's goal: understand exactly what <code>-p</code> does, edit a website live from your Mac, and run a Postgres database whose data survives when the container is deleted. About 35 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Containers are meant to be thrown away. You delete one and start a fresh one every time you deploy. That is fine for your app's code, but not for your users' data. If the database container is deleted and the student records go with it, that is a real production incident. Every Kubernetes and cloud setup you will see later is built on today's two ideas: how traffic gets <em>into</em> a container, and where data lives <em>outside</em> it.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b><code>-p HOST:CONTAINER</code> is a forwarding rule.</b> A container has its own private network, like a hostel room with its own internal phone line. <code>-p 8080:80</code> tells Docker: “anything that arrives at port 8080 on my Mac, forward it to port 80 inside the container.” The left number is yours to choose. The right number is whatever the app listens on. You already met the other half of this in lesson 3: <code>EXPOSE</code> only documents a port, and <code>-p</code> actually opens it. <a href="https://docs.docker.com/engine/network/port-publishing/">[Docker docs: port publishing]</a></p>
+<p><b>A container's own files die with the container.</b> In lesson 2 you saw that every container gets a thin writable layer on top of the image. Anything the app writes goes there. <code>docker rm</code> deletes that layer, and the data is gone. Stopping and restarting keeps it. Removing does not.</p>
+<p><b>A mount puts a folder from outside into the container.</b> There are two kinds you will use every day. <a href="https://docs.docker.com/engine/storage/">[Docker docs: storage]</a></p>
+<ul>
+<li><b>Bind mount</b>: a folder on your Mac, for example <code>-v "$PWD":/app</code>. You see and edit the same files from both sides. Great during development.</li>
+<li><b>Named volume</b>: storage that Docker creates and manages, for example <code>-v pgdata:/var/lib/postgresql/data</code>. You don't care where it is on disk. Use this for databases.</li>
+</ul>
+<p class="aside">Canteen analogy: the container is the plate. You wash it and reuse it all day, and nobody minds. The volume is the canteen's account register. You would never throw that away with the plate.</p>
+
+<h2>Do it: ports</h2>
+<ol class="steps">
+<li>Run nginx twice, on two different Mac ports, from the same image:
+<pre><code>docker run -d --name web1 -p 8080:80 nginx:alpine
+docker run -d --name web2 -p 8081:80 nginx:alpine
+curl -s localhost:8080 | head -4
+curl -s localhost:8081 | head -4</code></pre>
+Both containers listen on port 80 <em>inside</em>, and there is no clash, because each has its own network. Only the Mac side must be unique.</li>
+<li>See the forwarding rule Docker made:
+<pre><code>docker port web1</code></pre>
+You get <code>80/tcp -&gt; 0.0.0.0:8080</code>: container port 80 is reachable on Mac port 8080.</li>
+<li>Now try to start a third one on 8080 again:
+<pre><code>docker run -d --name web3 -p 8080:80 nginx:alpine</code></pre>
+It fails with <code>port is already allocated</code>. Two things cannot answer the same phone number on your Mac. Clean up:
+<pre><code>docker rm -f web1 web2 web3</code></pre></li>
+</ol>
+
+<h2>Do it: a bind mount for live editing</h2>
+<ol class="steps">
+<li>Make a folder with a web page:
+<pre><code>mkdir fest-site &amp;&amp; cd fest-site
+echo '&lt;h1&gt;My college fest page&lt;/h1&gt;' &gt; index.html</code></pre></li>
+<li>Run nginx with this folder mounted where nginx looks for its pages:
+<pre><code>docker run -d --name fest -p 8080:80 \
+  -v "$PWD":/usr/share/nginx/html:ro nginx:alpine
+curl localhost:8080</code></pre>
+<code>$PWD</code> is the current folder. The <code>:ro</code> at the end means read-only: the container can read your files but not change them.</li>
+<li>Edit the file on your Mac and fetch the page again. No rebuild, no restart:
+<pre><code>echo '&lt;h1&gt;Edited on my Mac&lt;/h1&gt;' &gt; index.html
+curl localhost:8080</code></pre>
+This is why developers use bind mounts: save the file, refresh the browser.</li>
+<li>Clean up and go back:
+<pre><code>docker rm -f fest
+cd ..</code></pre></li>
+</ol>
+
+<h2>Do it: a database that survives</h2>
+<ol class="steps">
+<li>First, watch data get lost. Start Postgres <em>without</em> a volume, add a row, delete the container, start a new one:
+<pre><code>docker run -d --name db -e POSTGRES_PASSWORD=secret postgres:17
+sleep 5
+docker exec db psql -U postgres -c "CREATE TABLE students(name text); INSERT INTO students VALUES ('Asha');"
+docker rm -f db
+
+docker run -d --name db -e POSTGRES_PASSWORD=secret postgres:17
+sleep 5
+docker exec db psql -U postgres -c "SELECT * FROM students;"</code></pre>
+You get <code>relation "students" does not exist</code>. Asha is gone. <code>-e</code> sets an environment variable; the Postgres image refuses to start without a password.</li>
+<li>Remove it and do it properly, with a named volume:
+<pre><code>docker rm -f db
+docker volume create pgdata
+docker run -d --name db -e POSTGRES_PASSWORD=secret \
+  -v pgdata:/var/lib/postgresql/data postgres:17
+sleep 5
+docker exec db psql -U postgres -c "CREATE TABLE students(name text); INSERT INTO students VALUES ('Asha');"</code></pre></li>
+<li>Now delete the container, as if you were deploying a new version, and start a brand-new one on the same volume:
+<pre><code>docker rm -f db
+docker run -d --name db -e POSTGRES_PASSWORD=secret \
+  -v pgdata:/var/lib/postgresql/data postgres:17
+sleep 5
+docker exec db psql -U postgres -c "SELECT * FROM students;"</code></pre>
+Asha is still there. The container is new; the data is not.</li>
+<li>Look at the volume:
+<pre><code>docker volume ls
+docker volume inspect pgdata</code></pre>
+<code>Mountpoint</code> is a path inside Docker's Linux VM, not on your Mac. That is exactly the point: Docker manages it for you.</li>
+<li>Clean up. A volume is <em>not</em> deleted when its container is, so you remove it on purpose:
+<pre><code>docker rm -f db
+docker volume rm pgdata</code></pre></li>
+</ol>
+<p class="aside">The mount path must match what the image actually uses. For <code>postgres:17</code> it is <code>/var/lib/postgresql/data</code>. From <code>postgres:18</code> onwards it is <code>/var/lib/postgresql</code>. Mount the wrong path and Postgres writes somewhere else, so your data is lost again with no error. The image's page on Docker Hub always says the right path. Read it.</p>
+
+<div class="box"><b>Stretch:</b> run <code>docker run --rm -v notes:/data alpine sh -c 'echo "chai at 4pm" &gt;&gt; /data/notes.txt'</code> three times, then <code>docker run --rm -v notes:/data alpine cat /data/notes.txt</code>. Three different containers, each deleted right away by <code>--rm</code>, and all three lines are saved. Also try <code>docker volume prune</code> to see which unused volumes you have collected, but read what it lists before you say yes.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="The left side is the port on your Mac, the right side is the port the app listens on inside the container.">
+<p class="q">1. A Flask app inside the container listens on 5000. You want to open it at <code>localhost:9000</code> on your Mac. Which flag?</p>
+<button>-p 5000:9000</button>
+<button>-p 9000:5000</button>
+<button>--expose 9000</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="Each container has its own network, so the container side can repeat. Only the host side must be unique.">
+<p class="q">2. You run two nginx containers, both listening on port 80 inside. Can both run at once?</p>
+<button>No, port 80 can only be used once on a machine</button>
+<button>Only if you rebuild the image with a different EXPOSE</button>
+<button>Yes, as long as they use different host ports, like 8080 and 8081</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="docker stop keeps the writable layer. docker rm deletes it, and anything not in a volume or mount goes with it.">
+<p class="q">3. A container wrote a log file into its own filesystem (no volume). Which command loses that file?</p>
+<button>docker rm</button>
+<button>docker stop</button>
+<button>docker restart</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="A bind mount shares a host folder, so edits show up immediately. Named volumes are managed by Docker and suit databases.">
+<p class="q">4. You are developing a website and want every save on your Mac to show in the container right away. What do you use?</p>
+<button>A named volume</button>
+<button>A bind mount of your project folder</button>
+<button>COPY in the Dockerfile and rebuild</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="Docker only keeps what is written inside the mounted path. If Postgres stores data in a different folder, the volume stays empty.">
+<p class="q">5. Your teammate mounted a volume on the Postgres container, but data still disappears after <code>docker rm</code>. The most likely cause?</p>
+<button>Volumes are deleted along with the container</button>
+<button>Postgres does not support volumes</button>
+<button>The volume is mounted on the wrong path, not where Postgres actually writes</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “You run your database in Docker. How do you make sure the data isn't lost when the container is replaced? What's the difference between a volume and a bind mount?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>Anything written into a container's own filesystem lives in its writable layer and is deleted with the container. So I mount a named volume at the database's data directory, for example <code>-v pgdata:/var/lib/postgresql/data</code>, checking the image docs for the exact path. The volume is managed by Docker and lives independently of any container, so I can delete and replace the container and the new one sees the same data. A bind mount instead maps a specific folder from the host into the container. I use bind mounts in development for live code editing and for config files, and named volumes for database data because Docker manages them and they don't depend on the host's folder layout.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's <a href="https://docs.docker.com/engine/storage/volumes/">Volumes</a> page (about 10 minutes), then skim <a href="https://docs.docker.com/engine/storage/bind-mounts/">Bind mounts</a> to compare. For ports, read <a href="https://docs.docker.com/engine/network/port-publishing/">Port publishing and mapping</a>.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../exam/module-1-docker.html">Question bank</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “what is <code>--mount</code> and how is it different from <code>-v</code>?”, “how do I back up a volume?”, or paste any error. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0003-write-a-dockerfile.html">← Lesson 03: Write a Dockerfile</a><a href="0005-networks-compose.html">Next: Networks &amp; Compose →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>
