@@ -1,0 +1,183 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Build &amp; Push in CI</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 08</div>
+<h1>Build &amp; push in CI</h1>
+<p class="lede">Today's goal: make GitHub build, test and publish your Docker image by itself every time you push code. No <code>docker build</code> on your laptop. About 45 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>Until now, every image was built on your Mac. In a company, nobody ships an image built on someone's laptop. “It worked on my machine” is exactly the problem Docker was supposed to solve. Instead, a <em>CI pipeline</em> (Continuous Integration) builds the image on a clean server for every change, tests it, and pushes it to a registry. From there, Kubernetes or a cloud service pulls it. Setting up this pipeline is one of the first real tasks a fresher DevOps engineer is given. It also looks very good on your GitHub profile when you apply for placements.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>A workflow is a recipe for a robot.</b> It is a YAML file in <code>.github/workflows/</code> inside your repository. It says <em>when</em> to run (for example, on every push to <code>main</code>) and <em>what</em> to do, as a list of steps. GitHub reads it and runs it on a fresh Linux virtual machine called a <em>runner</em>, which already has Docker installed. <a href="https://docs.github.com/en/actions/writing-workflows/quickstart">[GitHub docs: Actions quickstart]</a></p>
+<p><b>Most steps are ready-made <em>actions</em>.</b> <code>uses: actions/checkout@v7</code> means “run the checkout action, version 7”, which downloads your code onto the runner. Docker publishes official actions for logging in to a registry and for building and pushing images. You combine them like Lego blocks instead of writing shell scripts. <a href="https://docs.docker.com/build/ci/github-actions/">[Docker docs: GitHub Actions]</a></p>
+<p><b>Build → test → push, and never push what failed.</b> The pipeline builds the image, starts it and checks that it answers. Only if that passes does it push. On a pull request it builds and tests but does not push, so half-finished work never reaches the registry. Each image is tagged with the Git commit it came from, so you can always tell exactly which code is running.</p>
+<p class="aside">Mess kitchen analogy: until now you cooked at home and carried the tiffin to college. CI is the college's central kitchen. The recipe (workflow) is pinned on the wall, every batch is cooked in a clean kitchen, a cook tastes it before it leaves (smoke test), and each box is stamped with the batch number (the commit SHA). If a box is bad, you know exactly which batch it came from.</p>
+
+<h2>Before you start</h2>
+<ul>
+<li>A GitHub account, and <code>git</code> working on your Mac with a way to push (SSH key or <code>gh auth login</code>).</li>
+<li>The <code>hello-docker</code> folder from lesson 3 (<code>app.py</code>, <code>requirements.txt</code>, <code>Dockerfile</code>). If you deleted it, make it again from lesson 3's steps 2–4.</li>
+<li>We push to <b>GitHub Container Registry</b> (<code>ghcr.io</code>), GitHub's own registry. The workflow can log in to it with a token GitHub creates automatically for every run, so you don't need to set up any passwords. <a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">[GitHub docs: Container registry]</a></li>
+</ul>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Go into your lesson 3 folder and make it a Git repository:
+<pre><code>cd hello-docker
+git init -b main
+git add .
+git commit -m "Flask app with Dockerfile"</code></pre></li>
+<li>Create an empty repository on GitHub called <code>hello-docker</code> (public, no README), then push to it. Replace <code>YOUR-USERNAME</code>:
+<pre><code>git remote add origin git@github.com:YOUR-USERNAME/hello-docker.git
+git push -u origin main</code></pre>
+If you use the GitHub CLI, <code>gh repo create hello-docker --public --source . --push</code> does both at once.</li>
+<li>Create the workflow file. The folder names must be exactly these:
+<pre><code>mkdir -p .github/workflows</code></pre>
+Then create <code>.github/workflows/docker.yml</code>:
+<pre><code>name: Build and push image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v7
+
+      - name: Work out image name and tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and test the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: hello-docker:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run -d --name app -p 5000:5000 hello-docker:test
+          sleep 3
+          curl --fail --silent localhost:5000
+
+      - name: Push the image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha</code></pre>
+Section by section:
+<ul>
+<li><code>on</code>: run on every push to <code>main</code>, and on every pull request.</li>
+<li><code>permissions</code>: let this workflow read the code and write packages (images). Without <code>packages: write</code>, the push is refused.</li>
+<li><code>runs-on: ubuntu-latest</code>: a fresh Linux VM from GitHub, thrown away after the run.</li>
+<li><code>metadata-action</code>: works out the image name <code>ghcr.io/your-username/hello-docker</code> (in lowercase, which registries require) and the tags: <code>sha-1a2b3c4</code> for every build, plus <code>latest</code> on <code>main</code>.</li>
+<li><code>setup-buildx-action</code>: sets up BuildKit, the modern builder you have been using on your Mac all along.</li>
+<li><code>login-action</code>: logs in to <code>ghcr.io</code> with <code>GITHUB_TOKEN</code>, a short-lived token GitHub makes for each run. It never appears in the logs. Skipped for pull requests.</li>
+<li>First <code>build-push-action</code>: builds the image and <code>load</code>s it into the runner's Docker, so the next step can run it. <code>cache-from</code>/<code>cache-to: type=gha</code> saves layers between runs, so lesson 3's layer caching works in CI too.</li>
+<li><code>Smoke test</code>: plain shell commands. It starts the container and calls it. <code>curl --fail</code> exits with an error if the app does not answer properly, and that fails the whole run. A failed step stops the job, so the push never happens.</li>
+<li>Second <code>build-push-action</code>: pushes with the real tags. Thanks to the cache it does not rebuild. It reuses the layers from the first build.</li>
+</ul></li>
+<li>Commit and push the workflow:
+<pre><code>git add .github
+git commit -m "Build, test and push the image in CI"
+git push</code></pre></li>
+<li>On GitHub, open your repository and click the <b>Actions</b> tab. You see the run start. Click it, then click the <code>build</code> job, and watch each step's log live. A first run takes one to two minutes. A green tick means it worked.</li>
+<li>Find your image: on your repository's main page, look for <b>Packages</b> on the right side. Click <code>hello-docker</code>. You see the tags <code>latest</code> and <code>sha-…</code>. New packages are private by default. Open <b>Package settings</b>, scroll to <b>Danger Zone</b> and change the visibility to <b>Public</b>, so anyone can pull it without logging in.</li>
+<li>Pull and run the image that GitHub built, on your Mac:
+<pre><code>docker run -d --name from-ci -p 5050:5000 ghcr.io/YOUR-USERNAME/hello-docker:latest
+curl localhost:5050
+docker rm -f from-ci</code></pre>
+Your laptop never built this image. A clean server did, from the exact code in your repository. On an Apple Silicon Mac (M1 or later) you may see a warning that the image's platform <code>linux/amd64</code> does not match your machine. GitHub's runner is an Intel machine, so it built an Intel image, and Docker Desktop runs it through emulation. It still works. The last stretch below shows how to build for both.</li>
+<li>Now make CI catch a mistake. Break the app on purpose: in <code>app.py</code>, change <code>port=5000</code> to <code>port=5001</code>. Commit and push:
+<pre><code>git commit -am "Oops: wrong port"
+git push</code></pre>
+In the Actions tab, the <code>Smoke test</code> step turns red, and <code>Push the image</code> is skipped. The broken image never reached the registry. <code>latest</code> is still your last good version. Change it back to 5000, commit and push, and the run goes green again.</li>
+</ol>
+<p class="aside">Version numbers like <code>@v7</code> move over time. When you read this, a newer major version may exist. Each action's GitHub page shows its latest version. In company projects, teams often pin to an exact commit SHA for security, and let a bot like Dependabot update them.</p>
+
+<div class="box"><b>Stretch:</b> make a new branch, change the message in <code>app.py</code> and open a pull request. Watch the workflow run for the pull request: it builds and runs the smoke test, but the login and push steps are skipped. That is how teams check every change before it is merged. For a second stretch, push a Git tag like <code>v1.0.0</code> and extend the workflow so it also runs on tags (<code>on: push: tags: ['v*']</code>) and adds <code>type=semver,pattern={{version}}</code> to the tags list. Your image then gets a proper version number too. Finally, add a <code>docker/setup-qemu-action@v4</code> step before Buildx and <code>platforms: linux/amd64,linux/arm64</code> to the push step, so one image tag works on both Intel machines and Apple Silicon Macs.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="A clean CI runner builds from the exact code in the repository, so every image is reproducible and traceable to a commit, not to someone's laptop.">
+<p class="q">1. Why do companies build images in CI instead of on a developer's laptop?</p>
+<button>Laptops cannot run docker build</button>
+<button>A clean server builds from the exact committed code, so every image is reproducible and traceable</button>
+<button>Registries only accept images pushed from GitHub</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="The workflow file lives in the repository under .github/workflows, and GitHub runs it on a fresh runner VM.">
+<p class="q">2. Where must the workflow file be, for GitHub to run it?</p>
+<button>Anywhere, as long as it is named docker.yml</button>
+<button>In the repository's Settings page</button>
+<button>In the .github/workflows/ folder of the repository</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="When a step fails, the job stops, so later steps like the push never run. The last good image stays in the registry.">
+<p class="q">3. The smoke test step fails. What happens to the push step?</p>
+<button>It is skipped, so the broken image never reaches the registry</button>
+<button>It still runs, but marks the image as broken</button>
+<button>It pushes the image with the tag failed</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="latest moves with every push. A tag with the commit SHA points to exactly one version of the code, forever.">
+<p class="q">4. Why tag each image with the commit SHA, not only <code>latest</code>?</p>
+<button>Registries reject images tagged only with latest</button>
+<button>latest changes with every push; the SHA tag tells you exactly which code an image contains</button>
+<button>SHA tags make the image smaller</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="GITHUB_TOKEN is created automatically for each run and expires after it. With packages: write it can push to ghcr.io, so no personal password is stored.">
+<p class="q">5. The workflow logs in to <code>ghcr.io</code> with <code>secrets.GITHUB_TOKEN</code>. Where did you set that password?</p>
+<button>In the repository's Secrets page, before the first run</button>
+<button>In compose.yaml</button>
+<button>Nowhere. GitHub creates a short-lived token automatically for every run</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “Describe a CI pipeline you have built for a Docker image.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>I set up a GitHub Actions workflow for a Flask app. It runs on every push to <code>main</code> and on every pull request, on a fresh Ubuntu runner. It checks out the code, uses Docker's metadata action to work out the image name and tags, sets up Buildx and builds the image with the GitHub Actions layer cache, so unchanged dependency layers are reused between runs. Then a smoke test starts the container and curls it with <code>--fail</code>. If that passes and it's not a pull request, it logs in to GitHub Container Registry with the automatic <code>GITHUB_TOKEN</code>, so no long-lived passwords are stored, and pushes the image tagged with the commit SHA and <code>latest</code>. If any step fails, the push is skipped, so only tested images reach the registry. I tested that by pushing a deliberate bug: the smoke test failed and <code>latest</code> stayed on the last good version.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> Docker's <a href="https://docs.docker.com/build/ci/github-actions/">GitHub Actions</a> guide, especially the pages on <a href="https://docs.docker.com/build/ci/github-actions/manage-tags-labels/">tags and labels</a> and <a href="https://docs.docker.com/build/ci/github-actions/cache/">cache</a> (about 15 minutes). Then GitHub's <a href="https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions">workflow syntax</a> reference, to look up any key you see.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../exam/module-1-docker.html">Question bank</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how do I push to Docker Hub instead of ghcr.io?”, “how do I build for both Intel and ARM?”, or paste the red step's log from the Actions tab. When you're done, tell Claude how the quiz went. That finishes module 1: next comes Kubernetes.</div>
+
+<nav class="course"><a href="0007-under-the-hood.html">← Lesson 07: Under the hood</a><span>Next: Module 2, Kubernetes (coming)</span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

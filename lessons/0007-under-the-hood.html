@@ -1,0 +1,156 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Under the Hood</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lesson 07</div>
+<h1>Under the hood</h1>
+<p class="lede">Today's goal: prove to yourself that a container is just a normal Linux process with a limited view (namespaces) and a limited budget (cgroups), all sharing one kernel. About 35 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>“What is the difference between a container and a virtual machine?” is asked in almost every Cloud and DevOps interview. Most candidates say “containers are lightweight VMs”, which is wrong, and the interviewer knows it. Today you will see the real answer with your own eyes. It also explains things you have already met: why lesson 6's container got <code>OOMKilled</code>, why each container can use port 80, and why a container stops when PID 1 ends.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>A container is a process, not a machine.</b> When you start a container, Docker asks the Linux kernel to start an ordinary process, the same kind you studied in your OS course. There is no second operating system booting. That is why a container starts in under a second and a VM takes a minute.</p>
+<p><b>Namespaces limit what the process can <em>see</em>.</b> The kernel gives the process its own private view of certain things <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">[man7: namespaces]</a>:</p>
+<ul>
+<li><b>PID</b>: its own process list, where it is PID 1.</li>
+<li><b>NET</b>: its own network interfaces, IP address and ports. (That is why two containers can both use port 80.)</li>
+<li><b>MNT</b>: its own filesystem, made from the image layers.</li>
+<li><b>UTS</b>: its own hostname.</li>
+<li><b>IPC</b> and <b>USER</b>: its own shared memory and user IDs.</li>
+</ul>
+<p><b>cgroups limit what the process can <em>use</em>.</b> Control groups set how much memory, CPU and how many processes a container may use. <code>-m 20m</code> in lesson 6 was a cgroup limit, and the kernel killed the process when it went over. <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">[man7: cgroups]</a></p>
+<p class="aside">Hostel analogy: the whole hostel is one Linux machine with one kernel, the warden. Each room is a container. Namespaces are the walls: from inside your room you only see your own things and your own room number. cgroups are the mess card: you get a fixed quota of food and electricity, however hungry you are. A VM, on the other hand, is building a whole separate hostel with its own warden.</p>
+
+<h2>One thing first: where is Linux on your Mac?</h2>
+<p>Namespaces and cgroups are Linux kernel features. macOS does not have them. So Docker Desktop runs a small Linux virtual machine in the background, and every container runs inside it. When this lesson says “the host”, it means that Linux VM, not macOS. On a Linux server in a company, there is no such VM: the containers run directly on the server's kernel.</p>
+
+<h2>Do it: one shared kernel</h2>
+<ol class="steps">
+<li>Ask two very different images which kernel they run on:
+<pre><code>docker run --rm alpine uname -r
+docker run --rm ubuntu uname -r</code></pre>
+Both print the same version, something like <code>7.0.12-linuxkit</code>. That is the kernel of Docker's Linux VM.</li>
+<li>Now ask which operating system they think they are:
+<pre><code>docker run --rm alpine cat /etc/os-release | head -1
+docker run --rm ubuntu cat /etc/os-release | head -1
+uname -r</code></pre>
+One says Alpine, one says Ubuntu, but the kernel is shared. The image only brings the <em>files</em> of a distribution (its programs and libraries), never its own kernel. The last command runs on your Mac and prints the macOS (Darwin) kernel version, a completely different kernel.</li>
+</ol>
+
+<h2>Do it: PID namespace</h2>
+<ol class="steps">
+<li>Start a long-running container:
+<pre><code>docker run -d --name sleeper alpine sleep 300</code></pre></li>
+<li>Look at the process list from inside:
+<pre><code>docker exec sleeper ps</code></pre>
+Only two processes: <code>sleep 300</code> as PID 1, and your <code>ps</code>. The container cannot see anything else on the machine.</li>
+<li>Now look at the same process from outside:
+<pre><code>docker top sleeper</code></pre>
+The same <code>sleep 300</code>, but with a big PID like <code>6545</code>. One process, two numbers: PID 1 inside its namespace, and a normal PID on the host.</li>
+<li>Remove the wall. <code>--pid=host</code> starts a container that shares the host's PID namespace:
+<pre><code>docker run --rm --pid=host alpine ps | grep 'sleep 300'
+docker run --rm --pid=host alpine ps | wc -l</code></pre>
+Now you see the sleeper, with the host PID, among nearly 200 processes of the Linux VM. The isolation you saw in step 2 was only a namespace. Nothing else was hiding it.</li>
+</ol>
+
+<h2>Do it: the other namespaces</h2>
+<ol class="steps">
+<li>UTS: give a container its own hostname:
+<pre><code>docker run --rm --hostname hostel-room-12 alpine hostname</code></pre></li>
+<li>NET: a container has its own network interface and IP address:
+<pre><code>docker run --rm alpine ip -4 addr show eth0</code></pre>
+You see an address like <code>172.17.0.3</code>, on the container's own <code>eth0</code>.</li>
+<li>See all namespaces of a process. Every file here is one namespace, and its number is its ID:
+<pre><code>docker run --rm alpine ls -l /proc/self/ns</code></pre></li>
+<li>Compare the PID namespace of two containers:
+<pre><code>docker exec sleeper readlink /proc/1/ns/pid
+docker run --rm alpine readlink /proc/1/ns/pid</code></pre>
+Two different numbers: two separate PID namespaces, two separate “rooms”.</li>
+</ol>
+
+<h2>Do it: cgroups</h2>
+<ol class="steps">
+<li>Start a container with a memory and CPU limit, and read the limits from inside:
+<pre><code>docker run --rm -m 100m --cpus 0.5 alpine \
+  cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max</code></pre>
+You get <code>104857600</code> (100 MB in bytes) and <code>50000 100000</code>, which means 50,000 microseconds of CPU in every 100,000: half a CPU. These files are the kernel's cgroup settings. Docker just wrote numbers into them.</li>
+<li>Without any flags, there is no limit:
+<pre><code>docker run --rm alpine cat /sys/fs/cgroup/memory.max</code></pre>
+<code>max</code>. By default, one container can use all the memory of the machine. In production you always set limits.</li>
+<li>Limit the number of processes, then try to start too many:
+<pre><code>docker run --rm --pids-limit 5 alpine \
+  sh -c 'for i in 1 2 3 4 5 6 7 8; do sleep 5 &amp; done; wait'</code></pre>
+<code>can't fork: Resource temporarily unavailable</code>. That is the cgroup stopping it. This also protects the machine from a “fork bomb”.</li>
+<li>You can change a running container's limits, and watch its usage live:
+<pre><code>docker update --memory 50m --memory-swap 50m sleeper
+docker stats --no-stream sleeper</code></pre>
+The memory column now shows <code>/ 50MiB</code>.</li>
+<li>Clean up:
+<pre><code>docker rm -f sleeper</code></pre></li>
+</ol>
+
+<div class="box"><b>Stretch:</b> run <code>docker run --rm alpine id</code>. It says <code>uid=0(root)</code>. By default the process inside is root, and without a user namespace it is the same root user as the host, only fenced in by namespaces. This is why good Dockerfiles switch to a non-root user with the <code>USER</code> instruction, and why you should be very careful with <code>--privileged</code> and with mounting <code>/var/run/docker.sock</code>. Then read about “rootless mode” in the Docker docs and explain in two sentences what it changes.</div>
+
+<h2>Container vs VM, in one table</h2>
+<table>
+<tr><th></th><th>Container</th><th>Virtual machine</th></tr>
+<tr><td>What it is</td><td>An isolated process on the host</td><td>A whole computer emulated by a hypervisor</td></tr>
+<tr><td>Kernel</td><td>Shares the host's kernel</td><td>Runs its own kernel</td></tr>
+<tr><td>Isolation from</td><td>Namespaces + cgroups</td><td>Hardware virtualization</td></tr>
+<tr><td>Starts in</td><td>Under a second</td><td>Tens of seconds to minutes</td></tr>
+<tr><td>Size</td><td>MBs (just app + libraries)</td><td>GBs (a full OS)</td></tr>
+<tr><td>Can run a different OS kernel?</td><td>No. Linux containers need a Linux kernel</td><td>Yes. Windows on Linux, and so on</td></tr>
+</table>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="2" data-explain="Containers share the host kernel. The image only provides the distribution's files, so uname -r shows the host kernel.">
+<p class="q">1. An Ubuntu container and an Alpine container on the same machine run <code>uname -r</code>. What do they print?</p>
+<button>Ubuntu's kernel and Alpine's kernel, different versions</button>
+<button>Nothing. Containers don't have a kernel</button>
+<button>The same version: the host's kernel, which both share</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Namespaces control visibility (PID, NET, MNT, UTS, IPC, USER). cgroups control resource usage (memory, CPU, PIDs).">
+<p class="q">2. Which kernel feature stops a container from seeing other processes, and which stops it from using all the memory?</p>
+<button>Namespaces hide processes; cgroups limit memory</button>
+<button>cgroups hide processes; namespaces limit memory</button>
+<button>Both are done by the Docker image</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Each container has its own network namespace with its own ports, so port 80 in one does not clash with port 80 in another.">
+<p class="q">3. Why can two containers both listen on port 80 at the same time?</p>
+<button>Docker renames the port behind the scenes</button>
+<button>Each has its own network namespace, with its own set of ports</button>
+<button>Only one of them really listens; the other waits</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Inside its PID namespace the process is PID 1. On the host, the same process has an ordinary PID.">
+<p class="q">4. Inside a container, <code>ps</code> shows <code>sleep 300</code> as PID 1. On the host, <code>docker top</code> shows it as PID 6545. Which is true?</p>
+<button>They are two different processes</button>
+<button>It is one process, with a different PID in each namespace</button>
+<button>Docker copies the process when you run docker top</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="macOS has no Linux namespaces or cgroups, so Docker Desktop runs containers inside a small Linux VM.">
+<p class="q">5. On a Mac, where do your containers' namespaces and cgroups actually live?</p>
+<button>In macOS's own kernel</button>
+<button>Inside each Docker image</button>
+<button>In a small Linux VM that Docker Desktop runs in the background</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">6. Interview practice (say it out loud or type it): “What is the difference between a container and a virtual machine? How does Docker isolate containers?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>A VM virtualizes hardware: a hypervisor runs a full guest operating system with its own kernel, so it is heavy, takes a while to boot and is sized in GBs. A container is just a process on the host that shares the host's kernel, so it starts in under a second and only carries the app and its libraries. The isolation comes from two Linux kernel features. Namespaces control what the process can see: its own PID tree where it is PID 1, its own network stack and ports, its own mount tree built from the image layers, hostname, IPC and users. cgroups control what it can use: memory, CPU and number of processes. For example, a memory limit is a cgroup, and going over it gets the process OOM-killed. Because the kernel is shared, isolation is weaker than a VM's, so in production you run as non-root, set resource limits and avoid privileged containers. On a Mac, Docker Desktop runs a small Linux VM, because macOS doesn't have these features.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Linux man pages for <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">namespaces(7)</a> and <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">cgroups(7)</a>. Read just the first screen of each (about 10 minutes). Then Docker's <a href="https://docs.docker.com/engine/containers/resource_constraints/">Resource constraints</a> page for the <code>-m</code>, <code>--cpus</code> and <code>--pids-limit</code> flags.</p>
+<p>Keep handy: <a href="../reference/docker-cli.html">CLI cheat sheet</a> · <a href="../reference/glossary.html">Glossary</a> · <a href="../exam/module-1-docker.html">Question bank</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “can I build a container without Docker, using only unshare?”, “how do Windows containers work?”, or “why is a container less isolated than a VM?”. When you're done, tell Claude how the quiz went so the next lesson is pitched right.</div>
+
+<nav class="course"><a href="0006-debug-broken-containers.html">← Lesson 06: Debug broken containers</a><a href="0008-build-push-ci.html">Next: Build &amp; push in CI →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>
