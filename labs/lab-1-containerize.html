@@ -16,7 +16,15 @@ git --version                  # and check you can log in to GitHub
 docker pull node:20-alpine
 docker pull nginx:alpine
 
-git clone https://github.com/shripada/ms-cloud-devops-labs</code></pre>
+# clone YOUR fork, not the original (see below)
+git clone https://github.com/&lt;your-username&gt;/ms-cloud-devops-labs</code></pre>
+<p><b>Fork first, then clone.</b> In the last block you push a workflow and branches to GitHub, and you can't push to the original repo. So each of you makes your own copy:</p>
+<ol>
+<li>Open <a href="https://github.com/shripada/ms-cloud-devops-labs">the repo</a> and click <b>Fork</b>.</li>
+<li><b>Untick "Copy the <code>main</code> branch only".</b> Block 6 needs the <code>lab/ci-broken</code> branch, and a main-only fork doesn't have it.</li>
+<li>In your fork, open the <b>Actions</b> tab and click the button to enable workflows. GitHub switches Actions off on new forks.</li>
+<li>Clone your fork with the command above.</li>
+</ol>
 
 <h2>The plan</h2>
 <table class="schedule">
@@ -32,7 +40,7 @@ git clone https://github.com/shripada/ms-cloud-devops-labs</code></pre>
 </table>
 
 <h2 id="b1"><span class="lab-time">0:00–0:15</span> Run the app without Docker</h2>
-<p>Clone the repo. In <code>backend/</code> and then in <code>frontend/</code>, copy <code>.env.example</code> to <code>.env</code>, run <code>npm ci</code>, then <code>npm run dev</code> — two terminals. Open <a href="http://localhost:5173">http://localhost:5173</a> and confirm the header says the API is healthy.</p>
+<p>Work in your clone of your fork. In <code>backend/</code> and then in <code>frontend/</code>, copy <code>.env.example</code> to <code>.env</code>, run <code>npm ci</code>, then <code>npm run dev</code> — two terminals. Open <a href="http://localhost:5173">http://localhost:5173</a> and confirm the header says the API is healthy.</p>
 <p>Write down three things, because you'll need them all day:</p>
 <ol class="steps">
 <li>The Node version each app expects</li>
@@ -176,8 +184,7 @@ volumes:
   notes-data:</code></pre>
 <p>Run it with <code>docker compose up --build</code>. Points to notice:</p>
 <ul>
-<li>Compose puts both services on one network, and each is reachable by its <em>service name</em>. Containers talk to each other as <code>backend:3000</code>, not <code>localhost</code>.</li>
-<li>The browser runs on your machine, not in a container, so the frontend's API URL still has to be something your browser can reach.</li>
+<li>Compose puts both services on one network, and each is reachable by its <em>service name</em>: from inside a container, the API is <code>backend:3000</code>. Nothing in this app uses that yet, though. The frontend container is only nginx serving files. The API calls come from JavaScript running in your browser, on your machine, so <code>API_URL</code> stays <code>http://localhost:3000</code> and reaches the backend through the published port. Your browser can't resolve <code>backend</code>. If you set <code>API_URL</code> to <code>http://backend:3000</code>, every call fails. The take-home task has a setup where a container really does call <code>backend:3000</code>.</li>
 <li><code>depends_on</code> with <code>service_healthy</code> waits for the healthcheck to pass, not just for the container to start.</li>
 <li>Set the variables inline rather than with <code>env_file</code>: <code>.env</code> is gitignored, your partner's checkout doesn't have one, and Compose fails outright when the file is missing.</li>
 </ul>
@@ -266,6 +273,11 @@ jobs:
 <h2>Take-home tasks</h2>
 <ol class="steps">
 <li>Add a Postgres service to your Compose file with a named volume, and see what happens to your data on <code>docker compose down</code> versus <code>down -v</code>.</li>
+<li>Make nginx proxy the API so the browser only ever talks to port 8080. Add this to <code>frontend/nginx.conf</code>:
+<pre><code>location /backend/ {
+  proxy_pass http://backend:3000/;
+}</code></pre>
+Rebuild the frontend with <code>API_URL: /backend</code> and remove the backend's <code>ports:</code> block. Now nginx, inside a container, calls <code>backend:3000</code>. That's the service-name traffic from block 5. The trailing <code>/</code> on <code>proxy_pass</code> strips the <code>/backend</code> prefix, so <code>/backend/api/notes</code> reaches the API as <code>/api/notes</code>. Work out why CORS no longer matters, and why port 3000 is no longer reachable from your machine.</li>
 <li>Scan your image with <code>docker scout quickview</code> or Trivy and read what it reports.</li>
 <li>Tag images with the git commit SHA and push them to GHCR from the pipeline.</li>
 </ol>
