@@ -58,10 +58,15 @@ RUN npm install
 RUN npm run build
 EXPOSE 3000
 CMD ["node", "dist/server.js"]</code></pre>
-<p>Build it, run it, and hit the health endpoint:</p>
-<pre><code>docker build -t backend:v1 .
+<p>Build it, run it, and hit the health endpoint. Run the commands from inside <code>backend/</code>: the <code>.</code> at the end of <code>docker build</code> is the <em>build context</em>, the folder Docker sends to the builder and that <code>COPY</code> reads from.</p>
+<pre><code>cd backend
+docker build -t backend:v1 .
 docker run --rm -p 3000:3000 backend:v1
-curl localhost:3000/health</code></pre>
+
+# in a second terminal
+curl localhost:3000/health     # {"status":"ok",...}</code></pre>
+<p>The container runs in the foreground. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop it, and <code>--rm</code> deletes it on exit.</p>
+<div class="trap"><b>“port is already allocated”.</b> Something else, usually the dev server from block 1 or an old container, is holding port 3000. Stop the dev server, then run <code>docker ps</code> and <code>docker stop &lt;name&gt;</code> on anything that shows <code>0.0.0.0:3000</code>.</div>
 <p>What each instruction does:</p>
 <table>
 <tr><td><code>FROM</code></td><td>picks the base image everything else is layered on</td></tr>
@@ -81,7 +86,7 @@ curl localhost:3000/health</code></pre>
 <h2 id="b3"><span class="lab-time">0:50–1:20</span> Backend Dockerfile, better version</h2>
 <p>The first version is slow to rebuild and much larger than it needs to be. Five changes fix that.</p>
 
-<p><b>1. Add a <code>.dockerignore</code></b> so junk never enters the build:</p>
+<p><b>1. Add a <code>.dockerignore</code></b> next to the Dockerfile, at <code>backend/.dockerignore</code>, so junk never enters the build:</p>
 <pre><code>node_modules
 dist
 .git
@@ -122,7 +127,16 @@ CMD ["node", "dist/server.js"]</code></pre>
 
 <div class="trap"><b>Trap 2 — <code>localhost</code> in the healthcheck.</b> Use <code>127.0.0.1</code>, not <code>localhost</code>. Inside the container <code>localhost</code> resolves to the IPv6 address <code>::1</code> first, the app listens on IPv4, and the check fails with “connection refused” while the app is perfectly fine. Your container sits there marked <code>unhealthy</code> and Compose refuses to start anything that depends on it.</div>
 
-<p>Build it as <code>backend:v2</code> and compare against your v1 numbers. Change one line of source and rebuild — it should now take seconds, because the dependency layers come from cache. Run <code>docker ps</code> after a minute and look for <code>healthy</code> in the status column.</p>
+<p>Replace the contents of <code>backend/Dockerfile</code> with the version above. Build it as <code>backend:v2</code>, this time run it in the background (<code>-d</code>) with a name, and compare against your v1 numbers:</p>
+<pre><code>docker build -t backend:v2 .
+docker run -d --name backend -p 3000:3000 backend:v2
+curl localhost:3000/health
+
+docker images backend          # v1 and v2 side by side
+docker ps                      # after ~30 s the status says (healthy)
+docker logs backend            # the app's output, since -d hides it</code></pre>
+<p>Change one line of source and rebuild. It should now take seconds, because the dependency layers come from cache.</p>
+<p><b>Leave this container running.</b> The frontend in the next block needs an API to talk to.</p>
 <div class="checkpoint"><b>Checkpoint:</b> v2 is far smaller than v1 (expect roughly 1.7 GB → 200 MB), a code-only rebuild is fast, and the status says healthy.</div>
 
 <h2><span class="lab-time">1:20–1:35</span> Break</h2>
@@ -130,6 +144,13 @@ CMD ["node", "dist/server.js"]</code></pre>
 
 <h2 id="b4"><span class="lab-time">1:35–2:00</span> Frontend Dockerfile</h2>
 <p>Same idea, with one difference. A frontend is just static files once it's built, so you don't need Node at runtime. You need a web server.</p>
+<p>First, create <code>frontend/.dockerignore</code>. Without it, your local <code>node_modules</code> gets copied over the clean install inside the image:</p>
+<pre><code>node_modules
+dist
+.git
+.env
+*.log</code></pre>
+<p>Then create <code>frontend/Dockerfile</code>:</p>
 <pre><code>FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
@@ -143,12 +164,32 @@ FROM nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80</code></pre>
+<p>Build it from inside <code>frontend/</code>, passing the API URL, and run it on port 8080. Check that the <code>backend</code> container from block 3 is still running (<code>docker ps</code>). If it isn't, start it again with the <code>docker run -d</code> command from block 3.</p>
+<pre><code>cd ../frontend
+docker build --build-arg API_URL=http://localhost:3000 -t frontend:v1 .
+docker run -d --name frontend -p 8080:80 frontend:v1</code></pre>
+<p>Open <a href="http://localhost:8080">http://localhost:8080</a>. The header should say the API is healthy, and you should be able to create a note. The request goes from your browser to <code>localhost:3000</code>, which is the backend container's published port. (Run on its own, the backend allows any origin, so CORS doesn't get in the way yet. Compose sets it properly in the next block.)</p>
 <p>Two things to understand here:</p>
-<p><b>Build-time vs runtime configuration.</b> The API URL gets baked into the JavaScript bundle when you run <code>npm run build</code>. Changing an environment variable on a running container won't change it. That's why it's an <code>ARG</code> passed with <code>docker build --build-arg API_URL=...</code>. Try building with a wrong URL and watch what breaks in the browser.</p>
-<p><b>SPA routing.</b> Open a note so the URL becomes <code>/notes/&lt;id&gt;</code>, then refresh. nginx looks for a file with that name and returns 404. The <code>nginx.conf</code> in the repo ships without the fix on purpose — one line repairs it:</p>
+<p><b>Build-time vs runtime configuration.</b> The API URL gets baked into the JavaScript bundle when you run <code>npm run build</code>. Changing an environment variable on a running container won't change it. That's why it's an <code>ARG</code> passed with <code>--build-arg</code>. See it break:</p>
+<pre><code>docker rm -f frontend
+docker build --build-arg API_URL=http://localhost:9999 -t frontend:wrong .
+docker run -d --name frontend -p 8080:80 frontend:wrong
+# reload the page, then open DevTools → Network: every API call fails
+
+docker rm -f frontend
+docker run -d --name frontend -p 8080:80 -e VITE_API_URL=http://localhost:3000 frontend:wrong
+# still broken: the env var arrives after the URL was already baked in</code></pre>
+<p>Put the good build back: <code>docker rm -f frontend</code>, then the <code>docker run</code> for <code>frontend:v1</code> again.</p>
+<p><b>SPA routing.</b> Open a note so the URL becomes <code>/notes/&lt;id&gt;</code>, then refresh. nginx looks for a file with that name and returns 404. The <code>nginx.conf</code> in the repo ships without the fix on purpose. In <code>frontend/nginx.conf</code>, add one line inside the existing <code>location /</code> block:</p>
 <pre><code>location / {
+  index index.html;
   try_files $uri $uri/ /index.html;
 }</code></pre>
+<p><code>nginx.conf</code> is copied in at build time, so the fix only takes effect after a rebuild:</p>
+<pre><code>docker build --build-arg API_URL=http://localhost:3000 -t frontend:v2 .
+docker rm -f frontend
+docker run -d --name frontend -p 8080:80 frontend:v2
+curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/notes/anything   # 200</code></pre>
 <div class="checkpoint"><b>Checkpoint:</b> the frontend loads from a container on port 8080 (<code>-p 8080:80</code>), and refreshing a note page returns 200, not 404.</div>
 
 <h2 id="b5"><span class="lab-time">2:00–2:20</span> Docker Compose</h2>
@@ -182,7 +223,11 @@ EXPOSE 80</code></pre>
 
 volumes:
   notes-data:</code></pre>
-<p>Run it with <code>docker compose up --build</code>. Points to notice:</p>
+<p>Compose publishes the same ports 3000 and 8080, so first remove the containers you started by hand:</p>
+<pre><code>docker rm -f backend frontend
+cd ..                           # back to the repo root, where docker-compose.yml lives
+docker compose up --build</code></pre>
+<p><code>--build</code> rebuilds both images from their Dockerfiles, so your <code>nginx.conf</code> fix is included. Open <a href="http://localhost:8080">http://localhost:8080</a> and create a note. Points to notice:</p>
 <ul>
 <li>Compose puts both services on one network, and each is reachable by its <em>service name</em>: from inside a container, the API is <code>backend:3000</code>. Nothing in this app uses that yet, though. The frontend container is only nginx serving files. The API calls come from JavaScript running in your browser, on your machine, so <code>API_URL</code> stays <code>http://localhost:3000</code> and reaches the backend through the published port. Your browser can't resolve <code>backend</code>. If you set <code>API_URL</code> to <code>http://backend:3000</code>, every call fails. The take-home task has a setup where a container really does call <code>backend:3000</code>.</li>
 <li><code>depends_on</code> with <code>service_healthy</code> waits for the healthcheck to pass, not just for the container to start.</li>
