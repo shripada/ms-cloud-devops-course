@@ -2,7 +2,7 @@
 <title>Networks &amp; Compose</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
 <div class="kicker"><a href="../index.html">Course home</a> · Lesson 05 · Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0004-Docker-Volumes-Networks-Compose-Classroom.pptx" target="_blank" rel="noopener">view</a> · <a href="../slides/0004-Docker-Volumes-Networks-Compose-Classroom.pptx" download>download</a></div>
 <h1>Networks &amp; Compose</h1>
-<p class="lede">Today's goal: make containers talk to each other by name, then run a two-container app (a Flask web app and a Redis database) with a single command. About 40 minutes.</p>
+<p class="lede">Today's goal: make containers talk to each other by name, then run a two-container app (a Flask web app and a Redis database) with a single command. About 50 minutes.</p>
 
 <h2>Why this matters for DevOps</h2>
 <p>Real apps are never one container. There is at least an app and a database, often a cache and a background worker too. Typing four long <code>docker run</code> commands in the right order, with the right network and volume flags, is slow and easy to get wrong. Docker Compose writes the whole setup down in one file that lives in Git next to the code. On your first day in a company, “clone the repo and run <code>docker compose up</code>” is very often step one. Kubernetes files in module 2 will look familiar because of today.</p>
@@ -114,6 +114,45 @@ cd ..</code></pre>
 </ol>
 
 <div class="box"><b>Stretch:</b> change <code>REDIS_HOST: redis</code> to <code>REDIS_HOST: localhost</code>, run <code>docker compose up -d</code> and <code>curl localhost:8000</code>. You get a server error. Read <code>docker compose logs web</code> and find <code>Connection refused</code>. That is idea 2, happening for real. Change it back. For a second stretch, add a third service <code>adminer</code> or a second copy of <code>web</code> on port 8001 and check that both share the same counter.</div>
+
+<h2>Spot the bugs: a broken Compose file</h2>
+<p>Your teammate pushed this <code>compose.yaml</code> for the same visits app and says “it works on my machine”. It does not work on yours. Read it slowly and find <b>six</b> problems before you open the answers. Write your list down first, like a code review.</p>
+<pre><code>services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: localhost
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data</code></pre>
+<p class="aside">Hint: some bugs stop Compose from starting at all, some let it start but the app fails, and some work fine today but will hurt you later. Find at least one of each.</p>
+
+<details class="box"><summary><b>Show the six problems</b></summary>
+<p><b>A. Compose refuses to start</b></p>
+<ol>
+<li><b>The volume is never declared.</b> <code>redis</code> uses <code>redis-data</code>, but there is no top-level <code>volumes:</code> block at the bottom. Compose stops before creating anything: <code>service "redis" refers to undefined volume redis-data: invalid compose project</code>. A named volume must be listed twice: once where it is used, once at the bottom where it is created. Like a function you call but never defined.</li>
+</ol>
+<p><b>B. Compose starts, but the app is broken</b></p>
+<ol start="2">
+<li><b><code>REDIS_HOST: localhost</code>.</b> Idea 2 again. Inside the <code>web</code> container, <code>localhost</code> is <code>web</code> itself, and there is no Redis there. Every request gives a 500 error, and <code>docker compose logs web</code> shows <code>Connection refused</code> for <code>localhost:6379</code>. Fix: <code>REDIS_HOST: redis</code>, the service name. Why did it “work on my machine”? Your teammate ran <code>python app.py</code> directly on their laptop, with Redis published on 6379. There, <code>localhost</code> really was the laptop. Inside a container it is not.</li>
+<li><b><code>"8000:8000"</code>: wrong container port.</b> The app listens on port 5000 inside the container (<code>app.run(port=5000)</code> and <code>EXPOSE 5000</code>). The right side of <code>HOST:CONTAINER</code> must match what the app listens on. With 8000 on the right, Docker forwards your request to a port where nothing is listening, and <code>curl localhost:8000</code> gives <code>Empty reply from server</code> or <code>Connection reset by peer</code>. Fix: <code>"8000:5000"</code>. Rule of thumb: the left number is your choice, the right number is the app's choice.</li>
+<li><b>No <code>depends_on</code>.</b> Nothing tells Compose to start <code>redis</code> before <code>web</code>, so they start in any order. Our Flask app gets away with it because it only connects to Redis when a request arrives. Many real apps (Django, Spring Boot, Node with a database pool) connect the moment they start, crash if the database isn't there, and the container exits. Add <code>depends_on: [redis]</code>, and remember it only controls start <em>order</em>, not readiness (quiz question 4 below).</li>
+</ol>
+<p><b>C. Works today, hurts later</b></p>
+<ol start="5">
+<li><b>Redis is published with <code>"6379:6379"</code>.</b> <code>web</code> doesn't need it: services on the same network talk directly, no <code>ports</code> needed. Worse, Docker publishes on all your laptop's network interfaces by default, so anyone on the same hostel or café Wi-Fi can connect to your Redis, which has no password. On a cloud server this is how databases get hacked. Delete the <code>ports</code> block. Only publish what a human or browser outside Docker must reach.</li>
+<li><b><code>redis:latest</code>.</b> <code>latest</code> does not mean “stable”; it is just whatever was pushed most recently. Six months from now a new major version can arrive, and the same file quietly runs different software. Pin the version you tested with: <code>redis:7-alpine</code>. Same reason your <code>requirements.txt</code> pins <code>flask==3.1.*</code>.</li>
+</ol>
+<p>Compare with the working file earlier in this lesson: every fix above is a line that file already has.</p>
+</details>
+
+<div class="box"><b>Try it for real:</b> go back into your <code>visits</code> folder, save the broken file over <code>compose.yaml</code>, and run <code>docker compose up -d --build</code>. Fix <em>one</em> problem at a time and run it again. Watch how the error moves: first Compose complains about the volume, then <code>curl</code> gives an empty reply, then the logs show <code>Connection refused</code>. This is how real debugging feels: fix the first error, see the next one. Finish with <code>docker compose down -v</code>.</div>
 
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
