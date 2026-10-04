@@ -219,28 +219,57 @@ on:
   pull_request:
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm test
       - run: npm run test:int
+      - run: npm run build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test -- --passWithNoTests
+      - run: npm run build
 
   docker:
-    needs: test
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t notes-backend:${{ github.sha }} ./backend
+      - run: docker build --build-arg API_URL=http://localhost:3000 -t notes-frontend:${{ github.sha }} ./frontend
 ```
 
-The order matters. Lint is fastest, so it fails first. Unit tests come next, then integration tests, which are slower because they exercise the real app. The Docker build only runs if all of that passes, because there's no point packaging code that's already broken. `needs: test` enforces that.
+After `actions/checkout`, the runner starts in the root of the repository. GitHub does not inspect the repo and automatically enter `backend/` or `frontend/`. The `defaults.run.working-directory` setting above changes the directory for every `run` step in that job. For example, the backend's `npm ci` is equivalent to running `cd backend && npm ci` locally.
+
+That default applies only to `run` steps, not to actions listed with `uses`. This is why each `setup-node` step also has a `cache-dependency-path`: it tells the action which lockfile belongs to that job. The Docker commands deliberately run from the repository root because `./backend` and `./frontend` are their build contexts.
+
+The order matters. Lint is fastest, so it fails first. Unit tests come next, followed by the backend's integration tests and each app's production build. The Docker job starts only after both application jobs pass; `needs: [backend, frontend]` enforces that. It then builds both images, using the same frontend API URL you used in Compose.
+
+The starter frontend does not contain a test file yet, so its test command uses Vitest's `--passWithNoTests` option. Once you add a frontend test, Vitest will discover and run it normally.
 
 Now the exercise:
 
