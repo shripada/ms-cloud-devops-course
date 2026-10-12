@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A practical, hands-on DevOps course: Docker first, then Kubernetes, CI/CD and cloud.">
+  <meta name="description" content="A practical, hands-on DevOps course: Docker first, then Kubernetes, infrastructure as code, observability and cloud.">
   <title>DevOps</title>
   <link rel="stylesheet" href="assets/course.css">
   <script src="assets/theme.js"></script>
@@ -13,7 +13,7 @@
     <header class="hero">
       <div class="eyebrow"><span class="mark" aria-hidden="true">&gt;_</span> Hands-on course</div>
       <h1>DevOps</h1>
-      <p class="lede">Learn the tools by running, building and debugging them—not by memorising definitions. We start with Docker; Kubernetes, CI/CD and cloud follow.</p>
+      <p class="lede">Learn the tools by running, building and debugging them—not by memorising definitions. We start with Docker; Kubernetes, Terraform &amp; Ansible, observability and cloud follow.</p>
       <div class="hero-actions">
         <a class="button primary" href="lessons/0001-your-first-container.html">Start lesson 1 <span aria-hidden="true">→</span></a>
         <a class="button" href="#course-map">See the course map</a>
@@ -66,7 +66,7 @@
     <section id="course-map" aria-labelledby="map-heading">
       <div class="kicker">Course map</div>
       <h2 id="map-heading">Module 1 — Docker</h2>
-      <p class="section-intro">Each lesson adds one practical skill. Upcoming lessons become links as they are published. Later modules cover Kubernetes, CI/CD and cloud deployment.</p>
+      <p class="section-intro">Each lesson adds one practical skill. Upcoming lessons become links as they are published.</p>
       <ol class="roadmap">
         <li class="done"><span>01</span><div><strong><a href="lessons/0001-your-first-container.html">Your first container</a></strong><small>Run, inspect and remove an nginx container</small><small class="slides-link">Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0001-Docker.pptx" target="_blank" rel="noopener">view in browser</a> · <a href="slides/0001-Docker.pptx" download>download</a></small></div><em>Ready</em></li>
         <li class="done"><span>02</span><div><strong><a href="lessons/0002-images-layers-registries.html">Images, layers &amp; registries</a></strong><small>Understand what you pull and how images are stored</small><small class="slides-link">Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0002-Docker-Images-Layers-Registries.pptx" target="_blank" rel="noopener">view in browser</a> · <a href="slides/0002-Docker-Images-Layers-Registries.pptx" download>download</a></small></div><em>Ready</em></li>
@@ -76,6 +76,22 @@
         <li class="done"><span>06</span><div><strong><a href="lessons/0006-debug-broken-containers.html">Debug broken containers</a></strong><small>Use logs, exec and inspect to find failures</small></div><em>Ready</em></li>
         <li class="done"><span>07</span><div><strong><a href="lessons/0007-under-the-hood.html">Under the hood</a></strong><small>Build interview-ready intuition for isolation</small></div><em>Ready</em></li>
         <li class="done"><span>08</span><div><strong><a href="lessons/0008-build-push-ci.html">Build &amp; push in CI</a></strong><small>Publish an image with GitHub Actions</small></div><em>Ready</em></li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="map-k8s-heading">
+      <h2 id="map-k8s-heading">Module 2 — Kubernetes</h2>
+      <p class="section-intro">Run the containers you built in module 1 on a cluster that heals, scales and updates them for you. Practice runs on a three-node cluster on your laptop, with one control plane node and two worker nodes, like a real company cluster. Use Docker Desktop's built-in Kubernetes (kind type) or minikube.</p>
+      <ol class="roadmap">
+        <li class="done"><span>09</span><div><strong><a href="lessons/0009-your-first-cluster.html">Your first cluster</a></strong><small>Pods, Deployments and the self-healing control loop</small></div><em>Ready</em></li>
+        <li class="done"><span>10</span><div><strong><a href="lessons/0010-services.html">Services</a></strong><small>Give changing Pods one stable address</small></div><em>Ready</em></li>
+        <li><span>11</span><div><strong>Manifests &amp; kubectl apply</strong><small>Describe your app in YAML and keep it in Git</small></div></li>
+        <li><span>12</span><div><strong>Config &amp; secrets</strong><small>Inject settings with ConfigMaps and Secrets</small></div></li>
+        <li><span>13</span><div><strong>Rolling updates &amp; health checks</strong><small>Ship new versions with zero downtime, and roll back</small></div></li>
+        <li><span>14</span><div><strong>Storage &amp; databases</strong><small>Keep data with PersistentVolumeClaims and StatefulSets</small></div></li>
+        <li><span>15</span><div><strong>Debug broken Pods</strong><small>Fix Pending, ImagePullBackOff and CrashLoopBackOff</small></div></li>
+        <li><span>16</span><div><strong>Ingress: ship your app</strong><small>Deploy your CI-built image behind one URL</small></div></li>
+        <li><span>17</span><div><strong>Helm</strong><small>Install, upgrade and roll back apps packaged as charts</small></div></li>
       </ol>
     </section>
 

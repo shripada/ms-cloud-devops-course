@@ -1,0 +1,125 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kubernetes Services</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 10</div>
+<h1>Services</h1>
+<p class="lede">Today's goal: give three changing Pods one fixed name and address, call them by name from inside the cluster, watch requests get shared between Pods, and open the app to your laptop with a LoadBalancer. About 30 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>In lesson 9 you saw that a replaced Pod gets a new name <em>and a new IP</em>. Now think about the app you will deploy in this module: a React frontend that calls an Express backend, which talks to PostgreSQL. The backend runs as three Pods, and any of them can be replaced at any moment. Which IP should the frontend call? One Pod's IP might be gone in five minutes. A list of all three keeps changing.</p>
+<p>You have seen the answer before. In lesson 5, Compose let containers reach each other by service name, like <code>backend:3000</code>, without knowing any IP. Kubernetes has the same idea, built for a cluster where Pods keep moving: the <b>Service</b>. Every real Kubernetes app uses Services, and “how does traffic reach a Pod?” is a standard interview question. <a href="https://kubernetes.io/docs/concepts/services-networking/service/">[Kubernetes docs: Service]</a></p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Service</b>: a fixed name and a fixed virtual IP (the <em>ClusterIP</em>) in front of a group of Pods. The Service doesn't list Pods by name. It has a <em>selector</em>, such as <code>app=who</code>, and it sends traffic to whichever Pods carry that label right now. A controller keeps a live list of those Pods' IPs, called an <em>EndpointSlice</em>. When a Pod is replaced, the list updates in seconds, while the Service's own name and IP never change. <a href="https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/">[Kubernetes docs: EndpointSlices]</a></p>
+<p><b>DNS</b>: the cluster runs its own DNS server, <em>CoreDNS</em> (you saw its Pods in <code>kube-system</code> in lesson 9). Every Service gets a DNS name. From a Pod in the same namespace, the short name <code>who</code> is enough. The full name is <code>who.default.svc.cluster.local</code>: Service name, namespace, then the cluster's suffix. <a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">[Kubernetes docs: DNS for Services and Pods]</a></p>
+<p><b>kube-proxy</b>: the ClusterIP is not a real machine, and no process listens on it. <code>kube-proxy</code>, the Pod you saw once on <em>every</em> node, writes network rules into each node's Linux kernel. Those rules catch any packet sent to the ClusterIP and redirect it to one of the Pods in the EndpointSlice. That is how one Service shares requests between several Pods. <a href="https://kubernetes.io/docs/reference/networking/virtual-ips/">[Kubernetes docs: Virtual IPs and service proxies]</a></p>
+<p class="aside">Think of your college office's landline number. The staff at the desk change every shift, but students always dial the same number, and whoever is on duty picks up. The landline number is the Service. The staff on duty today are the Pods. The office's duty roster, updated every shift, is the EndpointSlice.</p>
+
+<h3>Three types of Service</h3>
+<table>
+<tr><th>Type</th><th>Reachable from</th><th>Used for</th></tr>
+<tr><td><b>ClusterIP</b> (default)</td><td>Only inside the cluster</td><td>Pod-to-Pod traffic, for example frontend to backend, or backend to database</td></tr>
+<tr><td><b>NodePort</b></td><td>A port between 30000 and 32767 on <em>every</em> node's IP</td><td>Rarely used directly. It's the building block for LoadBalancer.</td></tr>
+<tr><td><b>LoadBalancer</b></td><td>Outside the cluster, through an external load balancer</td><td>Letting users in. On AWS, this creates a real AWS load balancer.</td></tr>
+</table>
+
+<h2>Before you start</h2>
+<p>You need the three-node cluster from <a href="0009-your-first-cluster.html">lesson 9</a>, and an empty <code>default</code> namespace. Check that your commands go to the right cluster first:</p>
+<pre><code>kubectl config current-context
+kubectl get nodes</code></pre>
+<p>You should see <code>docker-desktop</code> (option 1) or <code>minikube</code> (option 2), and three <code>Ready</code> nodes.</p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Start an app that tells you <em>which Pod answered</em>. The nginx page looks the same from every Pod, so we use <code>traefik/whoami</code>, a tiny web server that replies with its own Pod name:
+<pre><code>kubectl create deployment who --image=traefik/whoami --replicas=3
+kubectl rollout status deployment/who
+kubectl get pods -l app=who -o wide</code></pre>
+Note the three Pod IPs. Pods on the same node share a range, for example <code>10.244.1.x</code> on one worker and <code>10.244.2.x</code> on the other.</li>
+<li>Create a Service in front of them:
+<pre><code>kubectl expose deployment who --port=80
+kubectl get service who -o wide
+kubectl get endpointslices -l kubernetes.io/service-name=who</code></pre>
+<code>expose</code> copies the Deployment's selector, <code>app=who</code>, into the Service. The ClusterIP looks like <code>10.96.x.x</code>, a different range from the Pods. It's a virtual address that only Services use. The <code>ENDPOINTS</code> column lists exactly the three Pod IPs from step 1.</li>
+<li>A ClusterIP Service is only reachable from inside the cluster, so start a throwaway Pod to act as a client. <code>-it</code> gives you a shell inside it, and <code>--rm</code> deletes the Pod when you exit:
+<pre><code>kubectl run tmp --rm -it --image=busybox:1.36 -- sh</code></pre>
+At the <code>/ #</code> prompt, call the Service by name a few times:
+<pre><code>wget -qO- http://who | grep Hostname
+wget -qO- http://who | grep Hostname
+wget -qO- http://who | grep Hostname
+wget -qO- http://who | grep Hostname</code></pre>
+The <code>Hostname</code> changes between Pod names: kube-proxy is sharing your requests between the three Pods. Now try the full DNS name, and then try to ping the Service:
+<pre><code>wget -qO- http://who.default.svc.cluster.local | grep Hostname
+ping -c 2 who</code></pre>
+DNS resolves <code>who</code> to the ClusterIP, but the ping gets no reply. That's expected. The ClusterIP is not a machine, and kube-proxy's rules only forward the Service's port (80, over TCP). Ping uses a different protocol, so nothing answers it. Type <code>exit</code> to leave; the Pod is deleted.</li>
+<li>Now replace every Pod and check what changes:
+<pre><code>kubectl delete pods -l app=who
+kubectl rollout status deployment/who
+kubectl get service who
+kubectl get endpointslices -l kubernetes.io/service-name=who</code></pre>
+The Service's ClusterIP is exactly the same. The EndpointSlice shows three <em>new</em> Pod IPs. A client calling <code>http://who</code> never notices the change. This is the whole point of a Service.</li>
+<li>Break it on purpose. Scale to zero and look again:
+<pre><code>kubectl scale deployment/who --replicas=0
+kubectl get endpointslices -l kubernetes.io/service-name=who
+kubectl run tmp --rm -it --image=busybox:1.36 -- wget -qO- -T 3 http://who</code></pre>
+The endpoints show <code>&lt;unset&gt;</code>, and <code>wget</code> fails with <code>Connection refused</code>. The Service still exists and DNS still works, but there is no Pod behind it. Remember this pattern: when a Service “doesn't work”, check its endpoints first. Empty endpoints mean no running, ready Pod matches the selector. Bring the Pods back:
+<pre><code>kubectl scale deployment/who --replicas=3</code></pre></li>
+<li>Open the app to your laptop with a LoadBalancer Service. <code>--port</code> is the port the Service listens on. <code>--target-port</code> is the port the container listens on:
+<pre><code>kubectl expose deployment who --name=who-lb --type=LoadBalancer --port=8099 --target-port=80
+kubectl get service who-lb</code></pre>
+<i>Option 1 (Docker Desktop):</i> the <code>EXTERNAL-IP</code> fills in within a few seconds, and Docker Desktop also forwards the port to your laptop. Open <a href="http://localhost:8099">http://localhost:8099</a> and refresh a few times. The <code>Hostname</code> line changes as different Pods answer.<br>
+<i>Option 2 (minikube):</i> in a separate terminal, run <code>minikube tunnel</code> and leave it running (it may ask for your password). Then open <a href="http://localhost:8099">http://localhost:8099</a>.<br>
+Look at the <code>PORT(S)</code> column: something like <code>8099:31233/TCP</code>. The second number is a NodePort. A LoadBalancer Service is built on top of a NodePort: the external load balancer sends traffic to that port on the nodes, and kube-proxy takes it from there. On AWS the load balancer is a real AWS one. On your laptop, Docker Desktop plays that role. You can't open the NodePort yourself on this setup, because the nodes live inside Docker Desktop's virtual machine.</li>
+<li>Clean up. The Services don't belong to the Deployment, so delete them separately:
+<pre><code>kubectl delete deployment who
+kubectl delete service who who-lb
+kubectl get all</code></pre>
+Only the built-in <code>kubernetes</code> Service should remain. It's how Pods inside the cluster reach the API server.</li>
+</ol>
+<div class="box"><b>Stretch:</b> the most common Service bug at work is a selector that matches no Pods, often from a typo in a label. Create the <code>who</code> Deployment again, then make a Service by hand: <code>kubectl create service clusterip broken --tcp=80:80</code>. Run <code>kubectl describe service broken</code>, then answer: what is its selector, why are its endpoints empty, and how would you fix it? (Hint: compare with <code>kubectl get pods --show-labels</code>.)</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="2" data-explain="A Service finds Pods by label, through its selector. It never stores Pod names, which is why replaced Pods with new names are picked up automatically.">
+<p class="q">1. How does a Service decide which Pods to send traffic to?</p>
+<button>It stores the Pod names when you create it</button>
+<button>It sends traffic to every Pod in the namespace</button>
+<button>Its selector matches Pod labels, such as <code>app=who</code></button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="The Service keeps its name and ClusterIP. Only the EndpointSlice changes, to list the new Pods' IPs.">
+<p class="q">2. All three Pods behind a Service are deleted and replaced. What changes?</p>
+<button>The Service gets a new ClusterIP</button>
+<button>Only the EndpointSlice: it now lists the new Pod IPs</button>
+<button>Nothing works until you run <code>kubectl expose</code> again</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Empty endpoints mean no running, ready Pod matches the selector: the Pods are gone, not ready, or their labels don't match.">
+<p class="q">3. A teammate says “the backend Service is broken”. <code>kubectl get endpointslices</code> shows its endpoints as <code>&lt;unset&gt;</code>. What does that tell you?</p>
+<button>No running, ready Pod matches the Service's selector</button>
+<button>CoreDNS has crashed</button>
+<button>The Service needs a LoadBalancer type</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Frontend to backend is traffic inside the cluster, so a ClusterIP Service is enough. Only what users reach from outside needs a LoadBalancer (or, from lesson 16, an Ingress).">
+<p class="q">4. Your React frontend Pods call your Express backend Pods inside the cluster. Which Service type should the backend use?</p>
+<button>ClusterIP</button>
+<button>NodePort</button>
+<button>LoadBalancer, so the frontend can find it</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Interview practice (say it out loud or type it): “What is a Kubernetes Service? Walk me through how a request to a Service reaches a Pod.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>Pods are disposable, and each replacement gets a new IP, so clients can't rely on Pod IPs. A Service gives a group of Pods one stable DNS name and one virtual IP, the ClusterIP. It picks its Pods with a label selector, and a controller keeps an EndpointSlice listing the IPs of the ready Pods that match. When a client calls the Service by name, CoreDNS resolves the name to the ClusterIP. kube-proxy, which runs on every node, has written kernel rules that catch traffic to that ClusterIP and forward it to one of the Pods in the EndpointSlice, which spreads the load. ClusterIP is the default and only works inside the cluster. NodePort opens a port on every node, and LoadBalancer puts a cloud load balancer in front of that to let outside traffic in.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Kubernetes concept page <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Service</a> (read up to “Headless Services”) and the first part of <a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">DNS for Services and Pods</a>. About 20 minutes in total.</p>
+<p>Keep handy: <a href="https://kubernetes.io/docs/reference/kubectl/quick-reference/">kubectl quick reference</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how does kube-proxy pick which Pod gets a request?”, “why can't I ping a ClusterIP?”, or paste any error you see. When you're done, tell Claude how the quiz went so lesson 11 (manifests) is pitched right.</div>
+
+<nav class="course"><a href="0009-your-first-cluster.html">← Lesson 09: Your first cluster</a><span>Next: Lesson 11, Manifests &amp; kubectl apply (coming)</span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

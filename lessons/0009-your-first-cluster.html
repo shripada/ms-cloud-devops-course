@@ -1,0 +1,151 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your First Cluster</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 09</div>
+<h1>Your first cluster</h1>
+<p class="lede">Today's goal: start a Kubernetes cluster on your Mac, run nginx in it, kill a Pod and watch Kubernetes bring it back by itself, then scale to three copies. About 30 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>In module 1 you ran an app and a database with Docker Compose. That works well on one machine. Now think about a real company like IRCTC during Tatkal booking at 10 a.m. They need 50 copies of the booking service spread across many servers. When a server dies, its copies must start again somewhere else in seconds. When new code ships, the old copies must be replaced one by one, so nobody sees an error page. Compose cannot do any of this. Its job is “start these containers on this machine”. Nothing in Compose watches over them afterwards.</p>
+<p><b>Kubernetes</b> (often written <b>K8s</b>: K, 8 letters, s) is a <em>container orchestrator</em>. You tell it what you want running. It decides which machine runs each container, and it keeps checking that everything is still running. Almost every Cloud or DevOps job description in placements mentions it. AWS (EKS), Azure (AKS) and Google Cloud (GKE) all sell Kubernetes as a service. <a href="https://kubernetes.io/docs/concepts/overview/">[Kubernetes docs: Overview]</a></p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Cluster</b>: a group of machines (called <em>nodes</em>) managed together. The <em>control plane</em> is the brain. It holds the cluster's records (in a database called <em>etcd</em>), decides which node each container runs on (the <em>scheduler</em>), and answers every command you type (the <em>API server</em>). Each node runs an agent called the <em>kubelet</em>, which starts containers when the control plane tells it to. You never log in to nodes to start things. You talk only to the API server, using <code>kubectl</code>. <a href="https://kubernetes.io/docs/concepts/architecture/">[Kubernetes docs: Cluster architecture]</a></p>
+<p><b>Pod</b>: the smallest thing Kubernetes runs. A Pod wraps one container, or sometimes a few that must stay together. All containers in a Pod share one IP address. Kubernetes never runs a bare container. It always runs a Pod. Pods are <em>disposable</em>: when one dies, it is not repaired. A new Pod, with a new name and a new IP, replaces it. <a href="https://kubernetes.io/docs/concepts/workloads/pods/">[Kubernetes docs: Pods]</a></p>
+<p><b>Deployment</b>: you write down the <em>desired state</em>, for example “3 Pods of nginx, always”. A <em>controller</em> inside the control plane runs a loop forever. It compares the desired state with the actual state and fixes any difference. A Deployment does this through a helper called a <em>ReplicaSet</em>, whose only job is to keep the right number of Pods running. <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[Kubernetes docs: Deployments]</a></p>
+<p class="aside">Think of the AC in your hostel room. You set it to 24°C and walk away. You never say “cool for 10 minutes”. The AC keeps checking the room temperature and does whatever it takes to get back to 24°C. In Kubernetes, the Deployment is your 24°C setting and the controller is the thermostat. This idea, <em>declare what you want and let a loop fix the difference</em>, is the most important idea in all of Kubernetes. <a href="https://kubernetes.io/docs/concepts/architecture/controller/">[Kubernetes docs: Controllers]</a></p>
+
+<h2>Before you start</h2>
+<p>You need a practice cluster on your laptop. We will build it to look like a real company cluster: <b>three nodes</b>. One is the <em>control plane</em> node, which runs only the brain. The other two are <em>worker</em> nodes, which run your apps. With two workers you can watch Kubernetes spread copies of your app across machines, so that one machine dying doesn't take the whole app down. In production the brain always gets its own machines, so your apps can't use up the CPU and memory it needs. On EKS, AKS and GKE you don't even see those machines. A single-node cluster hides all of this, so don't use one for this module.</p>
+<p>There are two good ways to get a three-node cluster. Pick <b>one</b>. Every <code>kubectl</code> command in this module works the same on both.</p>
+
+<h3>Option 1 (recommended): the Kubernetes built into Docker Desktop</h3>
+<p>You already have Docker Desktop from module 1, on macOS or Windows. It can run a Kubernetes cluster for you, and it comes with <code>kubectl</code>, so there is nothing more to install. <a href="https://docs.docker.com/desktop/use-desktop/kubernetes/">[Docker docs: Kubernetes in Docker Desktop]</a></p>
+<ol>
+<li>Open the Docker Desktop Dashboard and go to the <b>Kubernetes</b> view.</li>
+<li>Select <b>Create cluster</b> and choose the <b>kind</b> type, not kubeadm. kind can build a multi-node cluster, but kubeadm only gives you a single node.</li>
+<li>Set the number of nodes to <b>3</b>. Docker Desktop makes one control plane node and two worker nodes. Leave the Kubernetes version at its default. Select <b>Create</b>. Setup takes a minute or two.</li>
+<li>When the cluster shows as running, open a terminal (Terminal on macOS, PowerShell on Windows) and point <code>kubectl</code> at it:
+<pre><code>kubectl config use-context docker-desktop</code></pre></li>
+</ol>
+<p class="aside">kind needs Docker Desktop's <em>containerd image store</em>. If the kind option is greyed out, go to <b>Settings → General</b>, tick <b>Use containerd for pulling and storing images</b>, and select <b>Apply</b>. If you already made a kubeadm cluster, delete it from the Kubernetes view first. If you don't see a Kubernetes view at all, your Docker Desktop is too old. Update it. The old <b>Settings → Kubernetes → Enable Kubernetes</b> switch only gives you a single node.</p>
+
+<h3>Option 2: minikube</h3>
+<p>minikube is a free tool from the Kubernetes project that runs a practice cluster inside Docker. Choose it if you don't use Docker Desktop (for example, on Linux), or if you want a cluster you can throw away and rebuild without touching Docker Desktop. It needs at least 2 CPUs and 2 GB of free memory for each node (so about 6 GB for three nodes), and 20 GB of free disk. <a href="https://minikube.sigs.k8s.io/docs/start/">[minikube docs: Get started]</a></p>
+<ul>
+<li><b>macOS</b> (Terminal):
+<pre><code>brew install kubectl minikube</code></pre></li>
+<li><b>Windows</b> (PowerShell):
+<pre><code>winget install -e --id Kubernetes.kubectl
+winget install Kubernetes.minikube</code></pre>
+Close PowerShell and open it again so it finds the new commands. If you don't have winget, use <code>choco install kubernetes-cli minikube</code> instead. <a href="https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/">[Kubernetes docs: kubectl on Windows]</a></li>
+<li><b>Both</b>: with Docker running, start a three-node cluster. The first start downloads about 1 GB, so give it a few minutes:
+<pre><code>minikube start --driver=docker --nodes=3</code></pre>
+minikube also points <code>kubectl</code> at this cluster for you. Each node is one Docker container: <code>minikube</code> is the control plane node, and <code>minikube-m02</code> and <code>minikube-m03</code> are the workers. <a href="https://minikube.sigs.k8s.io/docs/tutorials/multi_node/">[minikube docs: Multi-node clusters]</a></li>
+</ul>
+
+<p class="aside">If you have both clusters, <code>kubectl config get-contexts</code> lists them, and the one marked <code>*</code> is the cluster your commands go to. At work you will switch between dev, staging and production clusters in exactly this way. Checking your context first is a habit that saves careers.</p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>Say hello to the cluster:
+<pre><code>kubectl get nodes</code></pre>
+You should see three nodes with status <code>Ready</code>. On option 1 they are <code>desktop-control-plane</code> (role <code>control-plane</code>), <code>desktop-worker</code> and <code>desktop-worker2</code>. On option 2 they are <code>minikube</code>, <code>minikube-m02</code> and <code>minikube-m03</code>. Now look at the control plane parts from idea 1. They run as Pods too:
+<pre><code>kubectl get pods -n kube-system -o wide</code></pre>
+Find the Pods whose names start with <code>etcd-</code>, <code>kube-apiserver-</code>, <code>kube-scheduler-</code> and <code>kube-controller-manager-</code>. The <code>NODE</code> column shows they all run on the control plane node. The controller manager is the thermostat from the AC example: it runs the control loops. <code>kube-proxy</code> appears once on <em>each</em> node, because every node needs it. <code>-n</code> picks a <em>namespace</em>, which works like a folder for cluster objects. Your own work goes in the <code>default</code> namespace.</li>
+<li>First, try it the wrong way. Start a bare Pod with no Deployment:
+<pre><code>kubectl run solo --image=nginx
+kubectl get pods</code></pre>
+Wait until <code>solo</code> shows <code>Running</code>, then delete it and list again:
+<pre><code>kubectl delete pod solo
+kubectl get pods</code></pre>
+It's gone for good. Nobody had asked Kubernetes to keep it running, so nobody brought it back.</li>
+<li>Now do it the right way. Create a Deployment:
+<pre><code>kubectl create deployment web --image=nginx
+kubectl rollout status deployment/web</code></pre>
+The second command waits until the Pod is ready.</li>
+<li>See the chain of three objects it created:
+<pre><code>kubectl get deployment,replicaset,pods -o wide</code></pre>
+Look at the names. The ReplicaSet is <code>web-&lt;hash&gt;</code>, and the Pod is <code>web-&lt;hash&gt;-&lt;random&gt;</code>. The Deployment owns the ReplicaSet, and the ReplicaSet owns the Pod. The <code>SELECTOR</code> column shows the label <code>app=web</code>. The ReplicaSet counts its Pods by this label, not by name. The Pod's <code>NODE</code> column shows which node the scheduler picked.</li>
+<li>Open a second terminal and leave this running. It prints every change to Pods as it happens:
+<pre><code>kubectl get pods --watch</code></pre></li>
+<li>In your first terminal, delete the Pod. Copy its exact name from step 4:
+<pre><code>kubectl delete pod web-xxxxxxxxxx-xxxxx</code></pre>
+Watch the second terminal. It shows status changes, not app logs (those come from <code>kubectl logs</code>). The old Pod goes to <code>Terminating</code>, and a <em>new</em> Pod with a different name appears straight away, in <code>ContainerCreating</code> and then <code>Running</code>. This is the control loop at work. The desired state is 1, the actual state dropped to 0, so it created a new Pod.</li>
+<li>Scale up to three copies, and watch the second terminal again:
+<pre><code>kubectl scale deployment/web --replicas=3
+kubectl get pods -o wide</code></pre>
+<code>-o wide</code> shows each Pod's own IP address and node. Every Pod gets its own IP. Look at the <code>NODE</code> column: the scheduler spreads the Pods across both workers (three Pods on two workers means one worker gets two), so losing one machine doesn't take down every copy. Each node hands out IPs from its own range, so Pods on different nodes have different-looking IPs. On option 1 no Pod ever lands on the control plane node. That node carries a <em>taint</em>, a “staff only” sign that tells the scheduler to keep ordinary Pods away. See it with:
+<pre><code>kubectl describe node desktop-control-plane | grep -i taints</code></pre>
+Production clusters do the same. System Pods such as <code>kube-proxy</code> carry a matching <em>toleration</em>, like a staff ID card, so they can still run there. (On option 2, minikube does not taint its control plane node, so your Pods may land on both nodes.) Now try deleting <em>all</em> of them at once. Every Pod made by this Deployment carries the label <code>app=web</code>, so you can select them all by that label:
+<pre><code>kubectl delete pods -l app=web</code></pre>
+Within seconds, three new Pods are running.</li>
+<li>Reach nginx from your Mac. Pods live on the cluster's private network, so for now open a temporary tunnel to the Deployment (lesson 10 shows the proper way):
+<pre><code>kubectl port-forward deployment/web 8080:80</code></pre>
+Open <a href="http://localhost:8080">http://localhost:8080</a> and you should see “Welcome to nginx!”. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to close the tunnel. If port 8080 is already in use, try <code>8081:80</code>.</li>
+<li>Your module 1 debugging habits still work, with <code>kubectl</code> instead of <code>docker</code>:
+<pre><code>kubectl logs deployment/web
+kubectl exec deployment/web -- hostname
+kubectl describe deployment web</code></pre>
+At the bottom of <code>describe</code>, the <b>Events</b> list shows what the controller did: “Scaled up replica set … from 1 to 3”. When something breaks, <code>describe</code> and its Events are the first place to look.</li>
+<li>Prove that these are still ordinary containers. Each node is itself a container, and your nginx containers run <em>inside</em> the worker nodes. <code>crictl</code> is like <code>docker ps</code>, but for the container runtime inside a node.<br>
+<i>Option 1:</i> look inside each worker node:
+<pre><code>docker exec desktop-worker crictl ps --name nginx
+docker exec desktop-worker2 crictl ps --name nginx</code></pre>
+<i>Option 2:</i> look inside each node:
+<pre><code>minikube ssh -n minikube-m02 "sudo crictl ps --name nginx"
+minikube ssh -n minikube-m03 "sudo crictl ps --name nginx"
+minikube ssh -n minikube "sudo crictl ps --name nginx"</code></pre>
+You find three nginx containers in total, and the <code>POD</code> column links each one to its Pod. Everything from lesson 7 (namespaces, cgroups, a shared kernel) still applies. Kubernetes only decides <em>where</em> and <em>how many</em> containers run.</li>
+<li>Clean up. Deleting the Deployment also deletes its ReplicaSet and Pods:
+<pre><code>kubectl delete deployment web
+kubectl get pods</code></pre>
+Leave the cluster running for the next lesson. To free memory on option 1, stop the cluster from Docker Desktop's Kubernetes view. On option 2, <code>minikube stop</code> pauses the cluster and <code>minikube start</code> brings it back.</li>
+</ol>
+<div class="box"><b>Stretch:</b> while the <code>--watch</code> terminal is open, run <code>kubectl scale deployment/web --replicas=0</code>, then <code>--replicas=5</code>. Then look at <code>kubectl get replicaset</code>. The ReplicaSet's <code>DESIRED</code> column follows whatever you set. Then answer this: who scaled the ReplicaSet, you or the Deployment controller? (Hint: <code>kubectl describe deployment web</code>.)</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="2" data-explain="A bare Pod has no controller watching it. A Deployment (through its ReplicaSet) keeps checking the desired count and creates a new Pod when one disappears.">
+<p class="q">1. You delete a Pod made by <code>kubectl run</code>, and one made by a Deployment. What happens?</p>
+<button>Both come back, because Kubernetes always restarts Pods</button>
+<button>Neither comes back, because delete is permanent</button>
+<button>Only the Deployment's Pod is replaced, by a new Pod with a new name</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="You declare the desired state. A controller loop compares it with the actual state and fixes the difference, like a thermostat.">
+<p class="q">2. Which sentence best describes how a Deployment works?</p>
+<button>It stores the desired state; a controller loop keeps making the actual state match it</button>
+<button>It runs your commands once, in order, like a shell script</button>
+<button>It is a bigger container that contains other containers</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="kubectl talks only to the API server. The scheduler picks a node, and that node's kubelet starts the containers.">
+<p class="q">3. You run <code>kubectl scale deployment/web --replicas=3</code>. Who does <code>kubectl</code> actually talk to?</p>
+<button>The kubelet on each node, one by one</button>
+<button>The API server in the control plane</button>
+<button>Docker on your Mac</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Pods are disposable. The replacement is a new Pod with a new name and a new IP. That is why lesson 10 introduces Services, which give a fixed address.">
+<p class="q">4. A Pod with IP <code>10.244.0.5</code> is deleted and replaced. What IP does the new Pod get?</p>
+<button>Always 10.244.0.5, because the Deployment remembers it</button>
+<button>Probably a different one. Pods are disposable, and you shouldn't rely on their IPs</button>
+<button>None, because a replaced Pod has no network</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Interview practice (say it out loud or type it): “Why do we need Kubernetes if we already have Docker? What happens when a Pod in a Deployment dies?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>Docker builds images and runs containers on one machine, but nothing keeps watching them. Kubernetes is an orchestrator. It runs containers across a cluster of nodes, decides which node each one goes on, and keeps them running. You declare the desired state, for example a Deployment with three replicas of an image, and controllers in the control plane keep comparing it with the actual state. If a Pod in a Deployment dies, or its node fails, the ReplicaSet sees that only two of three are running and creates a new Pod. The scheduler places it on a healthy node and the kubelet there starts the container. The new Pod has a new name and IP, which is why we put a Service in front of Pods instead of using their IPs directly.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Kubernetes concept pages <a href="https://kubernetes.io/docs/concepts/overview/">Overview</a>, <a href="https://kubernetes.io/docs/concepts/workloads/pods/">Pods</a> and <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployments</a> (read up to “Updating a Deployment”; that part comes later). About 20 minutes in total.</p>
+<p>Keep handy: <a href="https://kubernetes.io/docs/reference/kubectl/quick-reference/">kubectl quick reference</a> · <a href="../reference/glossary.html">Glossary</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “what is inside etcd?”, “why is the ReplicaSet a separate object?”, or paste any error from Docker Desktop or <code>minikube start</code>. When you're done, tell Claude how the quiz went so lesson 10 (Services) is pitched right.</div>
+
+<nav class="course"><a href="0008-build-push-ci.html">← Lesson 08: Build &amp; push in CI</a><a href="0010-services.html">Next: Lesson 10, Services →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>
