@@ -1,0 +1,155 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manifests and kubectl apply</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 11</div>
+<h1>Manifests &amp; kubectl apply</h1>
+<p class="lede">Today's goal: write your app (a Deployment and a Service) as a YAML file, create it with <code>kubectl apply</code>, change it by editing the file, preview changes with <code>kubectl diff</code>, and watch the file win when someone changes the cluster by hand. About 30 minutes.</p>
+
+<h2>Why this matters for DevOps</h2>
+<p>In lessons 9 and 10 you typed commands like <code>kubectl create deployment</code>, <code>kubectl scale</code> and <code>kubectl expose</code>. That works on your laptop. Now imagine a real team: five people, three clusters (dev, staging, production), and an incident at 2 a.m. Someone asks, “how many replicas should the backend have, and who changed it last week?” If the answer only lives in someone's shell history, nobody knows.</p>
+<p>Real teams write the <em>desired state</em> of every app into files, keep the files in Git, and let a command (or a CI pipeline) make the cluster match the files. Git then tells you what is running, who changed it, and why, and you can undo a change with <code>git revert</code>. This idea is called <b>declarative configuration</b>, and it's the base of everything in the rest of this course: Helm in lesson 17, Terraform in module 3, and GitOps tools like Argo CD at work. <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/object-management/">[Kubernetes docs: Object management]</a></p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Imperative vs declarative</b>: an <em>imperative</em> command says <em>what to do</em>: “scale to 5”, “create this Service”. A <em>declarative</em> file says <em>what should exist</em>: “there is a Deployment called <code>who</code> with 5 replicas”. You hand the file to Kubernetes and it works out the steps. This is the same control loop you saw in lesson 9, where you deleted a Pod and the Deployment brought it back. Now you write the desired state yourself.</p>
+<p><b>A manifest</b>: a YAML file describing one or more Kubernetes objects. Every object has the same four top-level fields <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[Kubernetes docs: Objects]</a>:</p>
+<table>
+<tr><th>Field</th><th>Meaning</th><th>Example</th></tr>
+<tr><td><code>apiVersion</code></td><td>Which API group and version the object belongs to</td><td><code>apps/v1</code> for Deployments, <code>v1</code> for Services</td></tr>
+<tr><td><code>kind</code></td><td>The type of object</td><td><code>Deployment</code>, <code>Service</code></td></tr>
+<tr><td><code>metadata</code></td><td>Its name, namespace and labels</td><td><code>name: who</code></td></tr>
+<tr><td><code>spec</code></td><td>The desired state: what you want</td><td><code>replicas: 3</code></td></tr>
+</table>
+<p>When you read an object back from the cluster, there is a fifth field, <code>status</code>: what Kubernetes actually has right now. You write <code>spec</code>. Kubernetes writes <code>status</code>, and the controllers keep pushing status towards spec.</p>
+<p><b>kubectl apply</b>: “make the cluster match this file”. If the object doesn't exist, apply creates it. If it exists, apply compares the file with the live object and changes only the fields that differ. If nothing differs, it does nothing. Running it twice is safe, which is what you want in a CI pipeline that runs on every commit. <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">[Kubernetes docs: Declarative management with config files]</a></p>
+<p class="aside">Think of ordering lunch for your team. The imperative way: you ring the canteen every time someone joins or leaves: “add one thali”, “cancel one dosa”. Miss a call and nobody knows the real order. The declarative way: a shared sheet lists the order, and the canteen makes whatever the sheet says. To change the order, you edit the sheet. The sheet is your manifest, and the canteen is the control plane.</p>
+
+<h2>Before you start</h2>
+<p>You need the three-node cluster from <a href="0009-your-first-cluster.html">lesson 9</a> and a clean <code>default</code> namespace (lesson 10's cleanup step did this). Check:</p>
+<pre><code>kubectl config current-context
+kubectl get all</code></pre>
+<p>You should see <code>docker-desktop</code> (or <code>minikube</code>), and only the built-in <code>kubernetes</code> Service. Make a folder for this lesson and work inside it:</p>
+<pre><code>mkdir -p ~/k8s-practice/k8s
+cd ~/k8s-practice</code></pre>
+<p>Any text editor works. VS Code is a good choice: install the “YAML” extension by Red Hat and it will underline Kubernetes mistakes as you type. YAML cares about indentation, and it must be spaces, never tabs.</p>
+
+<h2>Do it</h2>
+<ol class="steps">
+<li>You don't have to write YAML from memory. Ask kubectl to print a manifest instead of creating anything. <code>--dry-run=client</code> means “don't send it to the cluster”, and <code>-o yaml</code> prints the object:
+<pre><code>kubectl create deployment who --image=traefik/whoami --replicas=3 --dry-run=client -o yaml</code></pre>
+Find <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>. Notice <code>app: who</code> appears <em>three</em> times: as the Deployment's own label, in the <code>selector</code>, and on the Pod <code>template</code>. Keep that in mind for step 7. The empty <code>strategy: {}</code>, <code>resources: {}</code> and <code>status: {}</code> lines are noise you can leave out.</li>
+<li>To see what a field means, ask the cluster itself. <code>kubectl explain</code> reads the API's own documentation, so it always matches your Kubernetes version:
+<pre><code>kubectl explain deployment.spec.replicas
+kubectl explain deployment.spec.template.spec.containers.ports</code></pre></li>
+<li>Now write the file. Create <code>k8s/who.yaml</code> with this content. The <code>---</code> line separates two objects in one file: the Deployment from lesson 9 and the Service from lesson 10.
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: who
+  labels:
+    app: who
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: who
+  template:
+    metadata:
+      labels:
+        app: who
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: who
+spec:
+  selector:
+    app: who
+  ports:
+    - port: 80
+      targetPort: 80</code></pre>
+Two small upgrades over the generated YAML: the image has a fixed tag, <code>v1.11</code>, not the moving <code>latest</code> (remember lesson 2), and <code>containerPort</code> documents which port the app listens on.</li>
+<li>Apply the whole folder. <code>-f k8s/</code> applies every YAML file in it:
+<pre><code>kubectl apply -f k8s/
+kubectl rollout status deployment/who
+kubectl get deployment,service who</code></pre>
+You see <code>deployment.apps/who created</code> and <code>service/who created</code>. One command, two objects.<br>
+<b>Predict first:</b> what will kubectl print if you run the exact same apply again? Write your guess down, then run it:
+<pre><code>kubectl apply -f k8s/</code></pre>
+Both lines say <code>unchanged</code>. Apply compared the file with the cluster, found nothing different, and did nothing. Running it a hundred times gives the same result. That property is called <em>idempotent</em>, and it's why a CI pipeline can safely run <code>kubectl apply</code> on every push.</li>
+<li>Change the app by editing the file, not the cluster. In <code>k8s/who.yaml</code>, change <code>replicas: 3</code> to <code>replicas: 5</code> and save. Before applying, preview what will change:
+<pre><code>kubectl diff -f k8s/</code></pre>
+The output is a normal diff: <code>-  replicas: 3</code> and <code>+  replicas: 5</code>, plus a <code>generation</code> number that goes up by one each time the spec changes. Nothing has changed in the cluster yet. Now apply:
+<pre><code>kubectl apply -f k8s/
+kubectl get deployment who</code></pre>
+The Deployment says <code>configured</code>, and the Service says <code>unchanged</code>. Apply only touched what differed. At work, <code>kubectl diff</code> is what you paste into a pull request so reviewers see exactly what will change in production.</li>
+<li>Now play the teammate who “quickly fixes something” by hand at 2 a.m.:
+<pre><code>kubectl scale deployment/who --replicas=1
+kubectl get deployment who</code></pre>
+The cluster now says 1, but your file says 5. This mismatch is called <em>drift</em>. <b>Predict first:</b> what will <code>kubectl diff</code> show, and what will happen after the next apply?
+<pre><code>kubectl diff -f k8s/
+kubectl apply -f k8s/
+kubectl get deployment who</code></pre>
+The diff shows <code>replicas: 1</code> going to <code>replicas: 5</code>, and apply puts it back. The file in Git is the source of truth, so a hand fix that isn't also written into the file will be undone by the next deploy. The rule at work: change the file, not the cluster.</li>
+<li>Break it on purpose. Kubernetes checks your manifest before accepting it. Copy the file, and in the copy change only the <em>Pod template's</em> label (the one under <code>template:</code>, the third <code>app: who</code>) to <code>app: whoo</code>:
+<pre><code>cp k8s/who.yaml bad.yaml
+# edit bad.yaml: under template → metadata → labels, set  app: whoo
+kubectl apply -f bad.yaml</code></pre>
+You get: <code>`selector` does not match template `labels`</code>. The Deployment's selector looks for <code>app=who</code>, but its own Pods would carry <code>app=whoo</code>, so it could never find them. Kubernetes refuses the whole Deployment. Now try a typo in a field name. In <code>bad.yaml</code>, fix the label back to <code>who</code>, then change <code>replicas:</code> to <code>replicass:</code>, and apply again. The error is long, but look for <code>unknown field "spec.replicass"</code>. Both checks happen on the API server <em>before</em> anything changes, so a broken file never half-applies. Delete the copy: <code>rm bad.yaml</code>.</li>
+<li>Delete everything the folder created, using the same files:
+<pre><code>kubectl delete -f k8s/
+kubectl get all</code></pre>
+Only the built-in <code>kubernetes</code> Service remains. Compare with lesson 10, where you had to remember to delete the Services separately. The files remember for you. Keep the <code>k8s/</code> folder: you will build on it in the next lessons.</li>
+</ol>
+<div class="box"><b>Stretch:</b> make it a real repository. Run <code>git init</code> in <code>~/k8s-practice</code>, commit <code>k8s/who.yaml</code>, and apply it. Then change the image tag to <code>v1.10</code>, run <code>kubectl diff -f k8s/</code>, commit, and apply. Run <code>kubectl get pods -w</code> in a second terminal while you apply. Answer: changing <code>replicas</code> kept the old Pods, but changing the image replaced every Pod. Why? (Hint: which part of the Deployment did you change, <code>spec.replicas</code> or <code>spec.template</code>? Lesson 13 covers this properly.) Finish with <code>git log -p</code>: the full history of your app's desired state.</div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="1" data-explain="Apply compares the file with the live object. When nothing differs, it changes nothing and prints “unchanged”. That's why a pipeline can run it on every commit.">
+<p class="q">1. You run <code>kubectl apply -f k8s/</code> twice in a row without editing anything. What happens the second time?</p>
+<button>It fails with “already exists”</button>
+<button>Nothing changes; kubectl prints <code>unchanged</code></button>
+<button>The Pods are recreated with new names</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="You write spec, the desired state. Kubernetes writes status, what it actually has, and the controllers keep moving status towards spec.">
+<p class="q">2. In a manifest, which field holds the state you <em>want</em>?</p>
+<button><code>metadata</code></button>
+<button><code>status</code></button>
+<button><code>spec</code></button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="The file says 4, so the next apply sets replicas back to 4. A hand change that isn't also in the file gets undone. Change the file, not the cluster.">
+<p class="q">3. Your Git repo's manifest says <code>replicas: 4</code>. During an incident, a teammate runs <code>kubectl scale --replicas=10</code>. The next day CI runs <code>kubectl apply</code> with the same file. How many replicas are there after that?</p>
+<button>4</button>
+<button>10</button>
+<button>14</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="kubectl diff shows exactly what apply would change, without changing anything. A server-side dry run would also validate it, but diff shows the change itself, which is what reviewers need.">
+<p class="q">4. Before changing production, your lead asks, “show me exactly what this file will change”. Which command do you run?</p>
+<button><code>kubectl get -f k8s/</code></button>
+<button><code>kubectl diff -f k8s/</code></button>
+<button><code>kubectl apply -f k8s/</code>, then check</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Interview practice (say it out loud or type it): “What's the difference between <code>kubectl create</code> and <code>kubectl apply</code>? Why do teams keep manifests in Git?”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p><code>kubectl create</code> is imperative: it creates an object, and fails if the object already exists. <code>kubectl apply</code> is declarative: you give it a manifest describing the desired state, and it creates the object if it's missing, or changes only the fields that differ if it exists. If nothing differs, it does nothing, so it's safe to run again and again, which makes it a good fit for CI. A manifest has <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>; Kubernetes adds <code>status</code>, and the controllers keep the actual state moving towards the spec. Teams keep manifests in Git so the files are the single source of truth: every change is reviewed in a pull request, often with the output of <code>kubectl diff</code>, every change has an author and a reason, and a bad change can be undone with <code>git revert</code>. Changes made by hand with commands like <code>kubectl scale</code> are drift, and the next apply undoes them, so the rule is to change the file, not the cluster. Tools like Helm and Argo CD build on this same idea.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Kubernetes pages <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Objects in Kubernetes</a> (about spec and status) and <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">Declarative management of Kubernetes objects using configuration files</a> (read up to “How apply calculates differences”). About 20 minutes in total.</p>
+<p>Keep handy: <a href="https://kubernetes.io/docs/reference/kubectl/quick-reference/">kubectl quick reference</a></p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how does apply know which fields I removed from the file?”, “what is server-side apply?”, or paste any YAML error you see. When you're done, tell Claude how the quiz went so lesson 12 (ConfigMaps and Secrets) is pitched right.</div>
+
+<nav class="course"><a href="0010-services.html">← Lesson 10: Services</a><span>Next: Lesson 12, Config &amp; secrets (coming)</span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

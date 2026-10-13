@@ -1,0 +1,108 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1.8cm,top=1.6cm,bottom=1.6cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+
+\newcommand{\cmd}[1]{\texttt{#1}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Lab Exam: Git \& GitHub}
+\fancyhead[R]{MSIS DevOps}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries Lab Exam: Git \& GitHub Workflow}\\[6pt]
+  {\large MSIS DevOps}
+\end{center}
+
+\vspace{4pt}
+
+\noindent
+\begin{tabular}{@{}p{0.5\textwidth}p{0.45\textwidth}@{}}
+  \textbf{Duration:} 90 minutes (practical) & \textbf{Followed by:} Viva voce \\[4pt]
+  \textbf{Name:} \hrulefill & \textbf{Reg.\ No.:} \hrulefill \\[4pt]
+  \textbf{GitHub username:} \hrulefill & \textbf{Date:} \hrulefill \\
+\end{tabular}
+
+\vspace{8pt}
+\hrule
+\vspace{8pt}
+
+\subsection*{Instructions}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Perform all operations in order. Each step builds on the previous one.
+  \item Use the Git command line for all local operations.
+  \item Keep your terminal open. You may be asked to show your command history,
+        \cmd{git log}, and the pull requests on GitHub during the viva.
+  \item Make one commit per step that asks for a commit, with a meaningful commit message.
+  \item The practical is followed by a viva on the commands you used and why.
+\end{itemize}
+
+\subsection*{Tasks}
+Perform the following Git operations:
+
+\begin{enumerate}[label=\textbf{\arabic*.},leftmargin=*,itemsep=3pt]
+  \item Create a local repository called \cmd{msis-devops} containing a
+        \cmd{readme.md} file, and push it to a \textbf{private} GitHub repository
+        with the same name.
+
+  \item Create a new branch called \cmd{project-setup}. Set up a sample Python
+        project containing \cmd{demo.py} and an appropriate \cmd{.gitignore} file.
+
+  \item Commit the changes, push the branch to the remote repository, and create
+        a pull request (PR).
+
+  \item Merge the PR into \cmd{main}.
+
+  \item Switch to \cmd{main} and pull the latest changes from the remote
+        repository. Create a new branch called \cmd{math-ops}. In \cmd{demo.py},
+        add functions named \cmd{add} and \cmd{sub}, each accepting two integers
+        and returning the result.
+
+  \item Commit the changes, push the branch, create a PR, and merge it into
+        \cmd{main}.
+
+  \item Switch to \cmd{main} and pull the latest changes. Create a new branch
+        called \cmd{multiply-op} and implement a \cmd{multiply} function in
+        \cmd{demo.py}. Commit the changes, push the branch, and create a PR.
+        \textbf{Do not merge this PR yet.}
+
+  \item Switch back to \cmd{main} and create a new branch called
+        \cmd{divide-op}. Implement a \cmd{divide} function in \cmd{demo.py}.
+        Commit the changes, push the branch, and create a PR.
+
+  \item Merge the PR created in step 7 into \cmd{main}.
+
+  \item Switch to \cmd{divide-op} and pull the latest changes from the remote
+        \cmd{main} branch into it.
+
+  \item Resolve any merge conflicts, ensuring that both the \cmd{multiply} and
+        \cmd{divide} functions are retained in \cmd{demo.py}.
+
+  \item Commit the conflict resolution and push the updated \cmd{divide-op}
+        branch to the remote repository.
+
+  \item Merge the PR created in step 8 into \cmd{main}.
+
+  \item Switch to \cmd{main}, pull the latest changes, and display \cmd{demo.py}
+        to confirm that it contains all four functions: \cmd{add}, \cmd{sub},
+        \cmd{multiply}, and \cmd{divide}.
+\end{enumerate}
+
+\vfill
+\hrule
+\vspace{4pt}
+\noindent\textbf{Examiner use only:}\quad
+Practical \rule{2cm}{0.4pt}\quad Viva \rule{2cm}{0.4pt}\quad
+Total \rule{2cm}{0.4pt}\quad Sign \rule{3cm}{0.4pt}
+
+\end{document}
