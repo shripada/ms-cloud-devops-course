@@ -13,7 +13,7 @@
     <header class="hero">
       <div class="eyebrow"><span class="mark" aria-hidden="true">&gt;_</span> Hands-on course</div>
       <h1>DevOps</h1>
-      <p class="lede">Learn the tools by running, building and debugging them—not by memorising definitions. We start with Docker; Kubernetes, Terraform &amp; Ansible, observability and cloud follow.</p>
+      <p class="lede">Learn the tools by running, building and debugging them—not by memorising definitions. We start with Docker; Kubernetes, Terraform, observability and cloud (AWS EKS) follow.</p>
       <div class="hero-actions">
         <a class="button primary" href="lessons/0001-your-first-container.html">Start lesson 1 <span aria-hidden="true">→</span></a>
         <a class="button" href="#course-map">See the course map</a>
@@ -86,12 +86,27 @@
         <li class="done"><span>09</span><div><strong><a href="lessons/0009-your-first-cluster.html">Your first cluster</a></strong><small>Pods, Deployments and the self-healing control loop</small></div><em>Ready</em></li>
         <li class="done"><span>10</span><div><strong><a href="lessons/0010-services.html">Services</a></strong><small>Give changing Pods one stable address</small></div><em>Ready</em></li>
         <li class="done"><span>11</span><div><strong><a href="lessons/0011-manifests-apply.html">Manifests &amp; kubectl apply</a></strong><small>Describe your app in YAML and keep it in Git</small></div><em>Ready</em></li>
-        <li><span>12</span><div><strong>Config &amp; secrets</strong><small>Inject settings with ConfigMaps and Secrets</small></div></li>
-        <li><span>13</span><div><strong>Rolling updates &amp; health checks</strong><small>Ship new versions with zero downtime, and roll back</small></div></li>
-        <li><span>14</span><div><strong>Storage &amp; databases</strong><small>Keep data with PersistentVolumeClaims and StatefulSets</small></div></li>
-        <li><span>15</span><div><strong>Debug broken Pods</strong><small>Fix Pending, ImagePullBackOff and CrashLoopBackOff</small></div></li>
-        <li><span>16</span><div><strong>Ingress: ship your app</strong><small>Deploy your CI-built image behind one URL</small></div></li>
-        <li><span>17</span><div><strong>Helm</strong><small>Install, upgrade and roll back apps packaged as charts</small></div></li>
+        <li class="done"><span>12</span><div><strong><a href="lessons/0012-config-health-checks.html">Config &amp; health checks</a></strong><small>ConfigMaps, Secrets and liveness, readiness and startup probes</small></div><em>Ready</em></li>
+        <li class="done"><span>13</span><div><strong><a href="lessons/0013-updates-releases.html">Updates &amp; releases</a></strong><small>Rolling updates, rollback, blue-green and canary</small></div><em>Ready</em></li>
+        <li class="done"><span>14</span><div><strong><a href="lessons/0014-data-jobs-scaling.html">Data, jobs &amp; scaling</a></strong><small>PersistentVolumeClaims, CronJobs and autoscaling</small></div><em>Ready</em></li>
+        <li class="done"><span>15</span><div><strong><a href="lessons/0015-traffic-namespaces-debugging.html">Traffic, namespaces &amp; debugging</a></strong><small>Ingress, ResourceQuotas, kubeconfig and the debugging flowchart</small></div><em>Ready</em></li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="map-iac-heading">
+      <h2 id="map-iac-heading">Module 3 — Infrastructure as code</h2>
+      <p class="section-intro">Create the infrastructure from files in Git, then configure what runs on it. Practice uses Docker and your laptop cluster, so it costs nothing.</p>
+      <ol class="roadmap">
+        <li class="done"><span>16</span><div><strong><a href="lessons/0016-terraform.html">Infrastructure as code</a></strong><small>Terraform: plan, apply, state, drift and environments</small></div><em>Ready</em></li>
+        <li class="done"><span>17</span><div><strong><a href="lessons/0017-ansible.html">Configuration management</a></strong><small>Ansible: inventory, idempotent playbooks, Vault, deploying to Kubernetes</small></div><em>Ready</em></li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="map-obs-heading">
+      <h2 id="map-obs-heading">Module 4 — Observability</h2>
+      <p class="section-intro">Know how your app is doing from numbers, and get told when users are hurting.</p>
+      <ol class="roadmap">
+        <li class="done"><span>18</span><div><strong><a href="lessons/0018-observability.html">Metrics, dashboards &amp; alerts</a></strong><small>Prometheus, Grafana, Alertmanager and error budgets</small></div><em>Ready</em></li>
       </ol>
     </section>
 

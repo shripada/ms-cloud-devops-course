@@ -1,0 +1,289 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Updates and releases</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 13</div>
+<h1>Updates &amp; releases</h1>
+
+<h2>Why this matters for DevOps</h2>
+<p>Think of IRCTC at 10 a.m., when Tatkal booking opens. The team can't say “site down for 10 minutes, we're deploying”. Real teams ship many times a day, while users keep clicking. So every release must replace old Pods with new ones a few at a time, check each new Pod is ready before it gets traffic, and have a one-command way back when the new version is broken. That's what a Deployment's rollout does for you, as long as you set it up right.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>A rollout makes a new ReplicaSet</b>: when you change anything in a Deployment's Pod <code>template</code> (usually the image), the Deployment creates a <em>new</em> ReplicaSet for the new version, scales it up, and scales the old one down. The old ReplicaSet is kept at 0 replicas. That's the rollback: “scale the old one back up”. Changing only <code>replicas</code> doesn't touch the template, so no rollout happens. That answers lesson 11's stretch question. <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[Kubernetes docs: Deployments]</a></p>
+<p><b>maxSurge and maxUnavailable</b>: the two dials of the <code>RollingUpdate</code> strategy. <code>maxSurge</code> is how many <em>extra</em> Pods may exist above <code>replicas</code> during the update. <code>maxUnavailable</code> is how many of the wanted Pods may be not-ready. With 4 replicas, <code>maxSurge: 1</code> and <code>maxUnavailable: 0</code>, Kubernetes starts 1 new Pod (5 in total), waits until it's <em>ready</em>, removes 1 old Pod, and repeats. Users never have fewer than 4 ready Pods. The readiness probe from lesson 12 is what “ready” means here.</p>
+<p><b>Release strategies</b>:</p>
+<table>
+<tr><th>Strategy</th><th>How</th><th>Use when</th></tr>
+<tr><td>RollingUpdate (default)</td><td>Replace Pods a few at a time; old and new run together for a while</td><td>Most releases. Needs old and new to work side by side</td></tr>
+<tr><td>Recreate</td><td>Delete all old Pods, then start new ones; short downtime</td><td>Old and new <em>can't</em> run together, e.g. a database schema change the old version can't read</td></tr>
+<tr><td>Blue-green</td><td>Two full Deployments; the Service selector points at one; switch it in one step</td><td>You want an instant switch and an instant way back, and can pay for double the Pods</td></tr>
+<tr><td>Canary</td><td>A few new Pods share the Service with many old ones, so a small share of users try the new version</td><td>You want to test a risky change on, say, 10% of users first</td></tr>
+</table>
+<p class="aside">Your college changes its exam timetable. <em>Rolling</em>: one department at a time moves to the new timetable. <em>Recreate</em>: the whole college closes for a day, then everyone starts on the new one. <em>Blue-green</em>: the new timetable is printed and ready on a second notice board, and the principal switches the arrow from the old board to the new one. <em>Canary</em>: only the final-year students try the new timetable for a week first.</p>
+
+<h2>Before you start</h2>
+<p>Same cluster and <code>~/k8s-practice</code> folder as before. Open a <b>second terminal</b> for watching. Lesson 11's <code>who.yaml</code> should still exist; if it doesn't, copy it from <a href="0011-manifests-apply.html">lesson 11, step 3</a>.</p>
+
+<h2>Do it: rolling update and rollback</h2>
+<ol class="steps">
+<li>Give <code>who</code> a safe update strategy and a readiness probe. In the Deployment part of <code>who.yaml</code>, set <code>replicas: 4</code>, set the image to <code>traefik/whoami:v1.10</code>, and add these lines. <code>strategy</code> goes under <code>spec:</code>, next to <code>replicas</code>; <code>readinessProbe</code> goes under the container, next to <code>ports</code>:
+<pre><code>spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  ...
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 2</code></pre>
+<pre><code>kubectl apply -f who.yaml
+kubectl rollout status deployment/who
+kubectl get rs -l app=who</code></pre>
+One ReplicaSet with 4 Pods.</li>
+<li>Ship version 1.11. In the second terminal, watch: <code>kubectl get pods -l app=who -w</code>. In the first, edit the file's image to <code>traefik/whoami:v1.11</code> and apply. <b>Predict first:</b> at the busiest moment, how many Pods exist, and how many are ready?
+<pre><code>kubectl apply -f who.yaml
+kubectl rollout status deployment/who
+kubectl get rs -l app=who</code></pre>
+In the watch you see one new Pod appear, become <code>1/1</code>, then one old Pod <code>Terminating</code>, four times over. At most 5 Pods, never fewer than 4 ready. Now there are <em>two</em> ReplicaSets: the new one with 4 and the old one with 0. The old one is kept on purpose: it's the way back.</li>
+<li>Ship a broken version. Change the container to pass an argument whoami doesn't know, as if a bad build crashes on start-up. Under the container, next to <code>image</code>, add:
+<pre><code>          args: ["--no-such-flag"]</code></pre>
+<pre><code>kubectl apply -f who.yaml
+kubectl rollout status deployment/who --timeout=30s
+kubectl get pods -l app=who</code></pre>
+The rollout times out. One new Pod is in <code>CrashLoopBackOff</code>, and all four old Pods are still <code>1/1</code>. Because <code>maxUnavailable: 0</code>, Kubernetes won't remove an old Pod until a new one is ready, and this one never will be. <b>Users see nothing wrong.</b> Without the readiness probe, or with <code>maxUnavailable</code> bigger than 0, they would.</li>
+<li>Roll back. You can ask Kubernetes to go back to the previous ReplicaSet:
+<pre><code>kubectl rollout history deployment/who
+kubectl rollout undo deployment/who
+kubectl rollout status deployment/who
+kubectl get rs -l app=who</code></pre>
+Back to the healthy version in seconds. But now your file still says <code>--no-such-flag</code>, and the next <code>kubectl apply</code> (or the next CI run) would break it again. <code>rollout undo</code> is the emergency brake. The real fix is in Git: remove the <code>args</code> line, commit, and apply. Do that now, then check <code>kubectl diff -f who.yaml</code> shows nothing.</li>
+<li>Feel the difference with Recreate. Change <code>strategy</code> to just <code>type: Recreate</code> (delete the <code>rollingUpdate:</code> block, it isn't allowed with Recreate), change the image back to <code>v1.10</code>, and apply while the watch runs. All four Pods go <code>Terminating</code> together, and only then do new ones start. For a few seconds there are zero Pods: that's real downtime. Put the strategy back to RollingUpdate when you're done.</li>
+<li>Try the shortcut, and see why it's a trap. <code>kubectl set image</code> changes the image of a live Deployment directly:
+<pre><code>kubectl set image deployment/who whoami=traefik/whoami:v1.11
+kubectl diff -f who.yaml</code></pre>
+The diff shows the cluster runs <code>v1.11</code> but Git says <code>v1.10</code>. That's drift (lesson 11). Nobody reading the repo knows what's running, and you can't rebuild the same cluster from Git. At work: CI builds the image once, then changes the tag <em>in the manifest in Git</em>, and that commit is what gets applied. The same image moves from dev to staging to production; only its settings (lesson 12) change. That's <b>build once, deploy many</b>. Put the file and cluster back in step: <code>kubectl apply -f who.yaml</code>.</li>
+</ol>
+
+<h2>Do it: blue-green and canary</h2>
+<ol class="steps" start="7">
+<li>Blue-green is just two Deployments and a Service selector. Create <code>bluegreen.yaml</code>:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: shop, track: blue }
+  template:
+    metadata:
+      labels: { app: shop, track: blue }
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-green
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: shop, track: green }
+  template:
+    metadata:
+      labels: { app: shop, track: green }
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop
+spec:
+  selector: { app: shop, track: blue }
+  ports:
+    - port: 80</code></pre>
+<pre><code>kubectl apply -f bluegreen.yaml
+kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- \
+  sh -c 'for i in 1 2 3 4 5 6; do wget -qO- http://shop | grep Hostname; done'</code></pre>
+Every answer comes from a <code>shop-blue-…</code> Pod. Green is running and ready, but gets no users. Now switch: in the file, change the Service's selector to <code>track: green</code>, apply, and run the same <code>kubectl run</code> line. Every answer now comes from <code>shop-green-…</code>. One small change moved all users at once, and switching back is the same change in reverse.</li>
+<li>Canary: let both share the Service. Change the Service's selector to only <code>{ app: shop }</code>, and set <code>shop-blue</code> to 3 replicas and <code>shop-green</code> to 1. Apply and run the loop again, with 12 requests instead of 6. About a quarter of answers come from green, because the Service spreads requests across all 4 matching Pods. To widen the canary, change the replica counts. (Tools like Argo Rollouts or a service mesh give exact percentages; the idea is the same.) Clean up: <code>kubectl delete -f bluegreen.yaml</code>.</li>
+</ol>
+
+<h2>Do it: pulling from a private registry</h2>
+<ol class="steps" start="9">
+<li>In <a href="0008-build-push-ci.html">lesson 8</a> your CI pushed an image to GitHub Container Registry (GHCR). If that package is private, try to run it (put your own GitHub username and image name in):
+<pre><code>kubectl create deployment mine --image=ghcr.io/YOUR-USERNAME/YOUR-IMAGE:latest
+kubectl get pods -l app=mine
+kubectl describe pod -l app=mine | tail -5</code></pre>
+<code>ImagePullBackOff</code>, and the events say something like <code>401 Unauthorized</code> or <code>denied</code>. The kubelet on the node tried to pull the image with no login. (If your package is public it just works; change its visibility to private in GitHub to try this.)</li>
+<li>Give the cluster credentials. Create a GitHub personal access token (classic) with only the <code>read:packages</code> scope, store it in a Secret of type <code>docker-registry</code>, and tell the Pod to use it:
+<pre><code>kubectl create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io \
+  --docker-username=YOUR-USERNAME \
+  --docker-password=YOUR-TOKEN
+kubectl patch deployment mine -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull"}]}}}}'
+kubectl get pods -l app=mine -w</code></pre>
+The new Pod pulls the image and runs. In a manifest this is two lines under the Pod's <code>spec:</code>: <code>imagePullSecrets:</code> and <code>- name: ghcr-pull</code>. (You can also attach the Secret to the namespace's <code>default</code> ServiceAccount so every Pod gets it.) Clean up: <code>kubectl delete deployment mine</code> and <code>kubectl delete secret ghcr-pull</code>.</li>
+</ol>
+
+<div class="trap"><b>Drill.</b> The college results portal has 6 replicas with <code>maxSurge: 2</code> and <code>maxUnavailable: 1</code>, and a readiness probe. (a) During an update, what's the most Pods that can exist, and the fewest that can be ready? (b) The new version never becomes ready. How many old Pods are still serving when the rollout gets stuck? (c) Version 4.0 changes the results table so version 3.x can't read it. Which strategy, and why?
+<details><summary>Show the answer</summary>
+<p>(a) At most 6 + 2 = <b>8</b> Pods; at least 6 − 1 = <b>5</b> ready. (b) Kubernetes may take 1 old Pod down at once and add up to 2 new ones. The new ones never get ready, so no more old ones are removed: <b>5 old Pods</b> keep serving, and 3 new ones are stuck. Users are fine, with a little less capacity. Follow it with <code>kubectl rollout status</code>, go back with <code>kubectl rollout undo</code>, then fix the manifest in Git. (c) <b>Recreate</b> (or blue-green with a planned cut-over): during a rolling update old and new Pods run at the same time, and the old ones would fail reading the new table. Recreate stops every old Pod before any new one starts, at the cost of a short planned downtime.</p></details>
+</div>
+
+<h2>Practice questions</h2>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>The train-booking API below must:</p>
+<ul class="needs">
+<li>run four replicas</li>
+<li>be updated without downtime</li>
+<li>receive traffic only once a Pod is ready to serve</li>
+</ul>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata: { name: booking-api }
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  selector: { matchLabels: { app: booking-api } }
+  template:
+    metadata: { labels: { app: booking-api } }
+    spec:
+      containers:
+      - name: api
+        image: ghcr.io/rail/booking-api:3.2.0
+        ports:
+        - containerPort: 8080
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }</code></pre>
+<ol class="asks">
+<li><span class="am">[3]</span>Detect the three problems that prevent this, and state how to fix each.</li>
+<li><span class="am">[2]</span>Analyze how your corrected manifest protects users during a rolling update.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b><code>replicas: 1</code>:</b> one Pod means no spare; if it restarts, or its node fails, the API is down. Fix: <code>replicas: 4</code>.</li>
+<li><b><code>maxSurge: 0, maxUnavailable: 1</code>:</b> no extra Pod may be added, and one may be taken away, so the update kills an old Pod <em>before</em> its replacement exists. With one replica that's a full outage on every update; with four, capacity drops by a quarter. Fix: <code>maxSurge: 1, maxUnavailable: 0</code>.</li>
+<li><b>Liveness probe only, no readiness probe:</b> a new Pod is added to the Service as soon as its container starts, before the app can serve, so users get errors. Fix: add a <code>readinessProbe</code>, for example <code>httpGet</code> on <code>/healthz</code>, port 8080.</li>
+<li><b>How the fixed manifest protects users:</b> with <code>maxUnavailable: 0</code>, an old Pod is removed only after a new one is Ready, and a new Pod joins the Service only when its readiness probe passes. If the new version can't start, it never gets traffic: the rollout stalls and the four old Pods keep serving.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> three problems, each with its fix 3 (1 each); how readiness and the rolling update together protect users 2. A correct description of each fix earns the mark.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A Deployment runs six replicas of <code>ghcr.io/rail/booking-api:2.3.0</code> with the RollingUpdate strategy, <code>maxSurge: 2</code>, <code>maxUnavailable: 0</code> and a readiness probe. The image is changed to 2.4.0, which never passes its readiness probe.</p>
+<ol class="asks">
+<li><span class="am">[2]</span>Analyze the sequence in which Pods are created and removed during the update.</li>
+<li><span class="am">[1]</span>Examine what users experience with 2.4.0.</li>
+<li><span class="am">[1]</span>Explain how the team can follow the rollout and return to 2.3.0.</li>
+<li><span class="am">[1]</span>Analyze why the old ReplicaSet is kept after the update.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Limits:</b> <code>maxSurge: 2</code> allows at most 8 Pods at once; <code>maxUnavailable: 0</code> means 6 must always be available.</li>
+<li><b>Sequence:</b> the Deployment creates a new ReplicaSet for 2.4.0 and starts 2 new Pods (8 in total). As each becomes Ready, the old ReplicaSet is scaled down by one and another new Pod starts. This repeats until the new ReplicaSet has 6 and the old one has 0.</li>
+<li><b>With the bad 2.4.0:</b> the 2 new Pods never become Ready, so no old Pod is removed. The rollout stalls with all six 2.3.0 Pods still serving. Users see no outage; the unready Pods never get traffic.</li>
+<li><b>Follow and roll back:</b> <code>kubectl rollout status</code> shows it waiting (and fails after <code>progressDeadlineSeconds</code>, 10 minutes by default); <code>kubectl get rs</code> shows old 6, new 2 not ready; <code>kubectl rollout history</code> lists the revisions. Go back with <code>kubectl rollout undo</code>, or set the tag back to 2.3.0 in the manifest in Git and apply it.</li>
+<li><b>Old ReplicaSet kept:</b> it stays, scaled to 0, so a rollback only scales it back up, using the exact same Pod template. That's fast and exact. How many are kept is set by <code>revisionHistoryLimit</code> (default 10).</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> Pod sequence 2; what users experience with the bad version 1; following the rollout and returning to 2.3.0 1 (exact commands not required); why the old ReplicaSet is kept 1.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>Version 5.0 of a university's exam-results API renames a database column that version 4.x reads.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Analyze the RollingUpdate and Recreate strategies of a Deployment.</li>
+<li><span class="am">[2]</span>Explain how blue-green and canary releases can be built with labels and Services.</li>
+<li><span class="am">[2]</span>Examine which strategy the team should use for version 5.0, and why.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>RollingUpdate</b> (default): replaces Pods a few at a time, within <code>maxSurge</code> and <code>maxUnavailable</code>, so there is no downtime, but old and new versions run side by side for a while.</li>
+<li><b>Recreate:</b> stops all old Pods, then starts the new ones. There's a short downtime, but the two versions never run at the same time.</li>
+<li><b>Blue-green:</b> run two Deployments, <code>results-blue</code> (4.x, labelled <code>version: blue</code>) and <code>results-green</code> (5.0, <code>version: green</code>). The Service selects <code>version: blue</code>. Test green privately, then change the Service's selector to <code>version: green</code>: all traffic switches at once, and switching back is instant.</li>
+<li><b>Canary:</b> both Deployments share a label the Service selects on, for example <code>app: results</code>, with 9 old Pods and 1 new one, so about 10% of requests reach the new version. Watch its errors, then shift the replica counts step by step. (An Ingress controller or service mesh can split by exact percentage.)</li>
+<li><b>For 5.0:</b> rolling update and canary both run 4.x and 5.0 together, and 4.x Pods would fail once the column is renamed. Use <b>Recreate</b> in a planned maintenance window (stop 4.x, migrate, start 5.0), or blue-green with a single planned cut-over and the migration done at the switch. Better long-term: change the schema in backward-compatible steps (add the new column, deploy, then drop the old one), so rolling updates work again.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> RollingUpdate vs Recreate 1; blue-green and canary with labels and Services 2; strategy for the schema change with reasoning 2.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>CI pushes the hostel API image to a private repository on Docker Hub, and the new Pods fail with <code>ImagePullBackOff</code>.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Analyze the cause.</li>
+<li><span class="am">[2]</span>Explain how the cluster can be given the credentials it needs to pull the image.</li>
+<li><span class="am">[2]</span>Compare changing the image of a running Deployment directly with changing the image tag in the manifest stored in Git, and analyze which keeps the cluster reproducible.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Cause:</b> each node's container runtime pulls the image. The repository is private, and the node has no credentials, so the registry answers <code>unauthorized</code> (or “not found”). <code>kubectl describe pod</code> shows it in Events. The kubelet keeps retrying, with longer and longer waits: <code>ImagePullBackOff</code>.</li>
+<li><b>Giving credentials:</b> create a read-only access token in Docker Hub, store it as a Secret of type <code>docker-registry</code> (<code>kubectl create secret docker-registry hub-pull --docker-server=... --docker-username=... --docker-password=&lt;token&gt;</code>), and reference it in the Pod template with <code>imagePullSecrets: [ { name: hub-pull } ]</code>, or attach it to the namespace's ServiceAccount so every Pod gets it. (On EKS with ECR, the node's IAM role gives pull access instead.)</li>
+<li><b><code>kubectl set image</code> directly:</b> quick, but the cluster now differs from what Git says. There's no review, no record of who changed it or why, and the next <code>kubectl apply</code> of the manifest silently puts the old image back.</li>
+<li><b>Changing the tag in Git:</b> the change goes through a pull request, is reviewed, and is recorded in history; apply (or a GitOps tool like Argo CD) makes the cluster match. Anyone can rebuild the cluster from Git, and rollback is a <code>git revert</code>. This keeps the cluster reproducible. Build the image once and promote the same tag (or digest) from dev to prod.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> cause 1; how to give the cluster credentials 2; comparison of the two ways, with the reproducible choice justified 2. Exact commands aren't required.</p>
+</details></div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking.</p>
+
+<div class="quiz" data-answer="1" data-explain="Only a change to the Pod template (image, env, args…) creates a new ReplicaSet. Scaling just changes the count on the existing one.">
+<p class="q">1. Which change makes a Deployment start a rollout with a new ReplicaSet?</p>
+<button><code>replicas: 3</code> → <code>replicas: 6</code></button>
+<button>Image <code>api:1.4</code> → <code>api:1.5</code></button>
+<button>Adding a label to the Deployment's own <code>metadata</code></button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="rollout undo scales the previous ReplicaSet back up. That's only possible because the old ReplicaSet is kept, at 0 replicas.">
+<p class="q">2. Why does a Deployment keep the old ReplicaSet after an update?</p>
+<button>Kubernetes forgets to delete it</button>
+<button>It still serves a few users</button>
+<button>So a rollback can just scale it back up</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="The selector switch moves all traffic at once. Both versions stay running, so switching back is just as fast.">
+<p class="q">3. In a blue-green release on Kubernetes, what actually moves users to the new version?</p>
+<button>Changing the Service's selector to the new Deployment's labels</button>
+<button>Deleting the old Deployment</button>
+<button>Running <code>kubectl rollout undo</code></button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="ImagePullBackOff with 401/denied means the kubelet had no credentials. A docker-registry Secret referenced in imagePullSecrets fixes it.">
+<p class="q">4. New Pods show <code>ImagePullBackOff</code>, and describe says <code>401 Unauthorized</code> from <code>ghcr.io</code>. What's the fix?</p>
+<button>Run <code>docker login</code> on your laptop</button>
+<button>Create a <code>docker-registry</code> Secret and add it to <code>imagePullSecrets</code></button>
+<button>Change the image tag to <code>latest</code></button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Exit question: “Your Deployment has 4 replicas, <code>maxSurge: 1</code>, <code>maxUnavailable: 0</code>. Walk me through an image update, then tell me what happens if the new version crashes.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>Changing the image changes the Pod template, so the Deployment creates a new ReplicaSet. With <code>maxSurge: 1</code> it may run one extra Pod, so it starts one new Pod (5 in total). With <code>maxUnavailable: 0</code> it may not drop below 4 ready Pods, so it waits until the new Pod passes its readiness probe, then removes one old Pod, and repeats until the new ReplicaSet has 4 and the old one has 0. If the new version crashes on start-up, the first new Pod goes into CrashLoopBackOff and never becomes ready, so no old Pod is ever removed. Users keep using the 4 old Pods and see nothing. I'd see it with <code>kubectl rollout status</code> timing out and <code>kubectl get pods</code>, check <code>kubectl logs --previous</code> for the reason, go back with <code>kubectl rollout undo</code>, which scales the old ReplicaSet (kept for this reason) back up, and then fix the image tag in the manifest in Git so the next apply doesn't bring the bad version back.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Kubernetes <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployments</a> page, sections “Updating a Deployment”, “Rolling Back a Deployment” and “Strategy”, and <a href="https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/">Pull an Image from a Private Registry</a>. About 25 minutes.</p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask Claude, for example “what does <code>progressDeadlineSeconds</code> do?” or “how does Argo CD keep the cluster matching Git?”. Tell Claude how the drill went so lesson 14 is pitched right.</div>
+
+<nav class="course"><a href="0012-config-health-checks.html">← Lesson 12: Config &amp; health checks</a><a href="0014-data-jobs-scaling.html">Lesson 14: Data, jobs &amp; scaling →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

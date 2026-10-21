@@ -2,7 +2,6 @@
 <title>Ports &amp; Persistent Data</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
 <div class="kicker"><a href="../index.html">Course home</a> · Lesson 04 · Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0004-Docker-Volumes-Networks-Compose-Classroom.pptx" target="_blank" rel="noopener">view</a> · <a href="../slides/0004-Docker-Volumes-Networks-Compose-Classroom.pptx" download>download</a></div>
 <h1>Ports &amp; persistent data</h1>
-<p class="lede">Today's goal: understand exactly what <code>-p</code> does, edit a website live from your Mac, and run a Postgres database whose data survives when the container is deleted. About 35 minutes.</p>
 
 <h2>Why this matters for DevOps</h2>
 <p>Containers are meant to be thrown away. You delete one and start a fresh one every time you deploy. That is fine for your app's code, but not for your users' data. If the database container is deleted and the student records go with it, that is a real production incident. Every Kubernetes and cloud setup you will see later is built on today's two ideas: how traffic gets <em>into</em> a container, and where data lives <em>outside</em> it.</p>

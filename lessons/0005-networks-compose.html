@@ -2,7 +2,6 @@
 <title>Networks &amp; Compose</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
 <div class="kicker"><a href="../index.html">Course home</a> · Lesson 05 · Slides: <a href="https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fshripada.github.io%2Fms-cloud-devops-course%2Fslides%2F0004-Docker-Volumes-Networks-Compose-Classroom.pptx" target="_blank" rel="noopener">view</a> · <a href="../slides/0004-Docker-Volumes-Networks-Compose-Classroom.pptx" download>download</a></div>
 <h1>Networks &amp; Compose</h1>
-<p class="lede">Today's goal: make containers talk to each other by name, then run a two-container app (a Flask web app and a Redis database) with a single command. About 50 minutes.</p>
 
 <h2>Why this matters for DevOps</h2>
 <p>Real apps are never one container. There is at least an app and a database, often a cache and a background worker too. Typing four long <code>docker run</code> commands in the right order, with the right network and volume flags, is slow and easy to get wrong. Docker Compose writes the whole setup down in one file that lives in Git next to the code. On your first day in a company, “clone the repo and run <code>docker compose up</code>” is very often step one. Kubernetes files in module 2 will look familiar because of today.</p>

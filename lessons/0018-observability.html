@@ -1,0 +1,404 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Metrics, dashboards, alerts</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 4 · Lesson 18</div>
+<h1>Observability: metrics, dashboards &amp; alerts</h1>
+
+<h2>Why this matters for DevOps</h2>
+<p>Customers say “checkout is slow sometimes”. Is it? For everyone, or 1 in 20? Since the last release, or always? Without data, the team argues and guesses. <code>kubectl get pods</code> says <code>Running</code>, but Running doesn't mean users are happy. Observability means the system tells you how it's doing, in numbers you can graph and alert on, so you hear about problems from an alert before you hear from customers, and you can prove a fix worked.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>Pull model and <code>/metrics</code></b>: your app keeps a few running numbers in memory (requests so far, errors so far) and shows them as plain text at an HTTP path, usually <code>/metrics</code>. A client library does this for you, for example <code>prom-client</code> in Node.js. <em>Prometheus</em> asks each target for that page every 15 seconds (it <em>pulls</em>, or <em>scrapes</em>), and stores each number with a timestamp: a <em>time series</em>. On Kubernetes it watches the API to find targets, so new Pods are scraped and deleted Pods dropped, with nobody updating a list. <a href="https://prometheus.io/docs/introduction/overview/">[Prometheus docs: Overview]</a></p>
+<p><b>Three kinds of metric</b>: a <em>counter</em> only goes up (total requests, total errors). The raw number isn't useful; how fast it grows is, so you use <code>rate()</code>. A <em>gauge</em> goes up and down (memory in use, Pods available). A <em>histogram</em> counts requests into duration buckets (“≤ 0.1 s: 900, ≤ 0.5 s: 980, ≤ 2.5 s: 1000”), which is what you need to calculate percentiles like p95. <a href="https://prometheus.io/docs/concepts/metric_types/">[Prometheus docs: Metric types]</a></p>
+<p><b>Dashboards and alerts are separate jobs</b>: <em>Grafana</em> draws graphs. It stores no metrics itself; it queries Prometheus as a <em>data source</em>. <em>Prometheus</em> also evaluates <em>alert rules</em> (“error rate above 5% for 2 minutes”) and sends firing alerts to <em>Alertmanager</em>, which groups related alerts into one message, holds back silenced ones, and delivers them to Slack, email or a paging service. <a href="https://prometheus.io/docs/alerting/latest/alertmanager/">[Prometheus docs: Alertmanager]</a></p>
+<p class="aside">A hospital ICU. Each patient's monitor shows heart rate and oxygen (the <code>/metrics</code> page). The central nursing station checks every monitor regularly and keeps the readings (Prometheus). The big screen at the station (Grafana) shows graphs for any bed you pick. And the rule “oxygen below 90% for 2 minutes → call the duty doctor” is an alert. Alertmanager is the operator who doesn't phone the doctor ten times for ten readings of the same patient, and doesn't call at all about a patient who's in surgery (silenced).</p>
+
+<p>Where the numbers come from:</p>
+<table>
+<tr><th>Source</th><th>What it measures</th><th>Example metric</th></tr>
+<tr><td>Your app's <code>/metrics</code></td><td>Requests, errors, durations: what users feel</td><td><code>http_requests_total{status="500"}</code></td></tr>
+<tr><td>cAdvisor (built into every node's kubelet)</td><td>CPU and memory of each container</td><td><code>container_memory_working_set_bytes</code></td></tr>
+<tr><td>kube-state-metrics</td><td>State of Kubernetes objects: desired vs available replicas, restarts</td><td><code>kube_pod_container_status_restarts_total</code></td></tr>
+<tr><td>node-exporter (one Pod per node)</td><td>The node's CPU, memory, disk, network</td><td><code>node_memory_MemAvailable_bytes</code></td></tr>
+</table>
+
+<h2>Before you start</h2>
+<p>Your 3-node cluster, with about 2 GB of memory free for the monitoring tools (Docker Desktop → Settings → Resources; 8 GB total works). Delete anything left over from earlier lessons. We install everything with <em>Helm</em>, a package installer for Kubernetes: think <code>apt install</code>, but for a set of manifests. Install it with <code>brew install helm</code> (Windows: <code>winget install Helm.Helm</code>). Make a folder, <code>obs-demo</code>. You'll want three terminals.</p>
+
+<h2>Do it: install and collect</h2>
+<ol class="steps">
+<li>Create <code>values.yaml</code>, the settings for the install:
+<pre><code>prometheus:
+  prometheusSpec:
+    scrapeInterval: 15s
+    retention: 15d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }</code></pre>
+Scrape every 15 seconds, keep 15 days of data. The two <code>...NilUsesHelmValues: false</code> lines let Prometheus pick up <em>your</em> scrape and alert configs from any namespace. The last four lines turn off checks on control plane parts that a laptop cluster doesn't expose.</li>
+<li>Install <code>kube-prometheus-stack</code>: Prometheus, Alertmanager, Grafana, kube-state-metrics and node-exporter, already wired together:
+<pre><code>helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace -f values.yaml --wait --timeout 10m
+kubectl get pods -n monitoring</code></pre>
+It takes 2–3 minutes. Count the <code>node-exporter</code> Pods: three, one per node. That's a DaemonSet.</li>
+<li>Deploy an app that has <code>/metrics</code>. <em>podinfo</em> is a small demo web server with a counter and a histogram, and handy paths like <code>/status/500</code> (return an error) and <code>/delay/1</code> (answer after 1 second). Create <code>shop-api.yaml</code>:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: shop-api }
+  template:
+    metadata:
+      labels: { app: shop-api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/stefanprodan/podinfo:6.9.2
+          ports:
+            - { name: http, containerPort: 9898 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-api
+  labels: { app: shop-api }
+spec:
+  selector: { app: shop-api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shop-api
+spec:
+  selector:
+    matchLabels: { app: shop-api }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s</code></pre>
+The <em>ServiceMonitor</em> is new: it tells Prometheus “scrape <code>/metrics</code> on every Pod behind any Service labelled <code>app: shop-api</code>”. It's a label selector, like a Service's, so it follows Pods as they come and go.
+<pre><code>kubectl apply -f shop-api.yaml
+kubectl rollout status deploy shop-api</code></pre></li>
+<li>Look at what Prometheus will read. In terminal 2:
+<pre><code>kubectl port-forward svc/shop-api 9898:80</code></pre>
+In terminal 1:
+<pre><code>curl -s localhost:9898/ &gt; /dev/null
+curl -s localhost:9898/status/500 &gt; /dev/null
+curl -s localhost:9898/metrics | grep -E '^# TYPE http|^http_requests_total|_count'</code></pre>
+You'll see lines like:
+<pre><code># TYPE http_requests_total counter
+http_requests_total{status="200"} 1
+http_requests_total{status="500"} 1
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_count{method="GET",path="root",status="200"} 1</code></pre>
+A metric name, <em>labels</em> in braces, and a value. That's the whole format. Stop the port-forward (Ctrl+C).</li>
+<li>Start some customers: a Pod that sends 9 good requests, 1 failing one and 1 slow one, again and again.
+<pre><code>kubectl run load --image=busybox:1.36 --restart=Never -- sh -c 'while true; do
+  for i in 1 2 3 4 5 6 7 8 9; do wget -qO- http://shop-api/ &gt;/dev/null; done
+  wget -qO- http://shop-api/status/500 &gt;/dev/null 2&gt;&amp;1
+  wget -qO- http://shop-api/delay/1 &gt;/dev/null
+  sleep 0.5; done'</code></pre>
+<b>Predict first:</b> 1 failure in every 11 requests. What error percentage should Prometheus show?</li>
+<li>Open Prometheus. In terminal 2:
+<pre><code>kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090</code></pre>
+Go to <a href="http://localhost:9090">localhost:9090</a> → Status → Target health. Find <code>shop-api</code>: two targets, both <code>UP</code>, one per Pod. Now scale and watch:
+<pre><code>kubectl scale deploy shop-api --replicas=3</code></pre>
+Refresh after about 30 seconds: three targets. You changed nothing in Prometheus. It saw the new Pod through the Kubernetes API, because the ServiceMonitor selects by label.</li>
+</ol>
+
+<h2>Do it: ask questions of the data</h2>
+<p>Paste each query into the Query page and press Execute (try the Graph tab too). The language is called PromQL. You don't need to memorise it, but you should be able to explain what each part does.</p>
+<ol class="steps" start="7">
+<li>Request rate, in requests per second, for the whole API:
+<pre><code>sum(rate(http_requests_total{job="shop-api"}[5m]))</code></pre>
+<code>http_requests_total</code> is a counter: on its own it's just a big number that keeps growing. <code>rate(...[5m])</code> looks at how much it grew over the last 5 minutes and divides by the seconds, giving requests per second for each Pod. (If a Pod restarts, its counter goes back to 0; <code>rate</code> notices and handles it.) <code>sum</code> adds up all the Pods. Click Graph.</li>
+<li>Error percentage, the number users feel:
+<pre><code>sum(rate(http_requests_total{job="shop-api", status=~"5.."}[5m]))
+  /
+sum(rate(http_requests_total{job="shop-api"}[5m])) * 100</code></pre>
+Top: rate of requests with a 5xx status (<code>=~"5.."</code> means “5 followed by any two characters”). Bottom: rate of all requests. Divide and multiply by 100. You get about 9, which matches your prediction: 1 in 11.</li>
+<li>95th-percentile latency: the time within which 95% of requests finish.
+<pre><code>histogram_quantile(0.95,
+  sum by (le) (rate(http_request_duration_seconds_bucket{job="shop-api"}[5m])))</code></pre>
+Each bucket (<code>le</code> means “less than or equal”) is a counter of requests at or under that duration. <code>rate</code> gives how fast each bucket grew, <code>sum by (le)</code> adds the Pods together bucket by bucket, and <code>histogram_quantile</code> finds the bucket where the 95% point falls and estimates within it. You get roughly 1.5 seconds: about 9% of requests take 1 second (the <code>/delay/1</code> ones), so the 95th percentile falls in the 1–2.5 s bucket. Now try the average: <code>sum(rate(http_request_duration_seconds_sum[5m])) / sum(rate(http_request_duration_seconds_count[5m]))</code>. About 0.1 seconds: the average makes it look fine and hides the slow requests. That's why “checkout is slow <em>for some</em>” needs a percentile, and a percentile needs a histogram. Because buckets are just counters, you can add them up across Pods, which you can't do with percentiles each Pod worked out for itself.</li>
+<li>The other sources, one query each:
+<pre><code>kube_deployment_status_replicas_available{deployment="shop-api"}
+sum by (pod) (rate(container_cpu_usage_seconds_total{pod=~"shop-api.*", container="api"}[5m]))
+node_memory_MemAvailable_bytes</code></pre>
+kube-state-metrics (a gauge: 3), cAdvisor (CPU per Pod, from a counter of CPU-seconds), node-exporter (one series per node).</li>
+</ol>
+
+<h2>Do it: one screen in Grafana</h2>
+<ol class="steps" start="11">
+<li>Get the password, then open Grafana. In terminal 3:
+<pre><code>kubectl get secret -n monitoring monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
+kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80</code></pre>
+Log in at <a href="http://localhost:3000">localhost:3000</a> as <code>admin</code> with that password. Connections → Data sources shows Prometheus already added: Grafana reads from it and keeps no metrics of its own.</li>
+<li>Dashboards → open <b>Kubernetes / Compute Resources / Namespace (Pods)</b>. The drop-down lists at the top (<code>namespace</code> and others) are <em>dashboard variables</em>. Grafana fills each list by querying Prometheus for the values that exist. Pick <code>default</code>, then <code>monitoring</code>: every panel redraws. Open any panel's menu → Edit and read its query: it contains <code>namespace="$namespace"</code>. The selected value is put into every panel's query. One dashboard serves every team and every cluster.</li>
+<li>Build the panel your on-call engineer wants. Dashboards → New → New dashboard → Add visualization → Prometheus. Paste the error-percentage query from step 8, set the title “shop-api error %”, and save. Add a second panel with the p95 query from step 9. That's the start of the one screen: request rate, error rate, latency.</li>
+</ol>
+
+<h2>Do it: alert, route, silence</h2>
+<ol class="steps" start="14">
+<li>Write the alert rule, <code>alerts.yaml</code>:
+<pre><code>apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop-api-alerts
+spec:
+  groups:
+    - name: shop-api
+      rules:
+        - alert: ShopApiHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="shop-api", status=~"5.."}[5m]))
+              /
+            sum(rate(http_requests_total{job="shop-api"}[5m])) &gt; 0.05
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "shop-api: {{ $value | humanizePercentage }} of requests are failing"</code></pre>
+Three parts: <em>what is measured</em> (the share of requests failing over 5 minutes), <em>the threshold</em> (more than 5%), and <em>the duration</em> (<code>for: 2m</code>: it must stay above 5% for 2 minutes, so one bad moment doesn't wake anyone).
+<pre><code>kubectl apply -f alerts.yaml</code></pre></li>
+<li>In Prometheus, open Alerts. <b>Predict first:</b> with about 9% errors, what state is <code>ShopApiHighErrorRate</code> in after 1 minute, and after 3? First <code>Pending</code> (condition true, waiting out the 2 minutes), then <code>Firing</code>. You'll also see <code>Watchdog</code> always firing, which is on purpose: it proves the alert pipeline works. On a laptop cluster a few built-in alerts like <code>NodeClockNotSynchronising</code> may show as pending; ignore them today.</li>
+<li>See it arrive in Alertmanager:
+<pre><code>kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-alertmanager 9093:9093</code></pre>
+Open <a href="http://localhost:9093">localhost:9093</a>. The alert is there, with its labels. In a real setup, Alertmanager's config would send it to Slack:
+<pre><code>route:
+  receiver: oncall-slack
+  group_by: [alertname, namespace]
+  group_wait: 30s
+  repeat_interval: 4h
+receivers:
+  - name: oncall-slack
+    slack_configs:
+      - api_url: &lt;Slack webhook URL, from a Secret&gt;
+        channel: "#shop-oncall"
+        send_resolved: true</code></pre>
+<code>group_by</code> is <em>grouping</em>: if all three Pods break at once, the alerts with the same name and namespace become <em>one</em> Slack message, not three. <code>repeat_interval</code> reminds every 4 hours while it's still firing. <code>send_resolved</code> posts again when it's fixed.</li>
+<li>Planned maintenance tonight: you'll restart the database, errors are expected, and nobody should be paged. In the Alertmanager page click <b>New Silence</b>, add the matcher <code>alertname="ShopApiHighErrorRate"</code>, set the duration to 1h, write a comment like “planned DB maintenance” and create it. Or from the terminal:
+<pre><code>kubectl exec -n monitoring alertmanager-monitoring-kube-prometheus-alertmanager-0 -c alertmanager -- \
+  amtool --alertmanager.url=http://localhost:9093 silence add \
+  alertname=ShopApiHighErrorRate --duration=1h --comment="planned DB maintenance"</code></pre>
+The alert is still firing in Prometheus, but Alertmanager marks it <code>suppressed</code> and sends nothing. When the hour ends, notifications start again by themselves, so a forgotten silence can't hide problems forever.</li>
+<li>Fix the “bug”: <code>kubectl delete pod load</code>. Within a few minutes the error rate drops to 0 and the alert resolves.</li>
+<li>Clean up:
+<pre><code>kubectl delete -f alerts.yaml -f shop-api.yaml
+helm uninstall monitoring -n monitoring
+kubectl delete namespace monitoring</code></pre></li>
+</ol>
+
+<h2>Alert on what users feel, and how much failure is allowed</h2>
+<p>Why didn't we alert on “CPU above 80%”? Because CPU isn't what users feel. A Pod can sit at 90% CPU and serve every request fast: no one should wake up. And the database can go down, so the API returns 500s instantly while using almost no CPU: users suffer, and a CPU alert stays quiet. Alert on the symptoms users see (errors, latency); use CPU and memory on the dashboard to find the cause.</p>
+<p>How many errors are too many? Zero isn't realistic, and chasing it stops you from ever releasing. A <em>service level objective</em> (SLO) sets the target, for example “99.5% of checkout requests succeed, measured over 30 days”. The other 0.5% is the <em>error budget</em>. With 10 lakh checkout requests a month, that's 5,000 failed requests the team may “spend”. A bad release that fails 1% of requests uses up the month's budget in about 15 days, so it gets rolled back. If the budget is nearly used up, the team slows down releases and works on reliability; if lots is left, they can ship faster. The dashboard shows the 30-day success rate and the budget left, and an alert fires when the success rate over the last hour drops below 99.5%:</p>
+<pre><code>sum(rate(http_requests_total{job="shop-api", status!~"5.."}[1h]))
+  /
+sum(rate(http_requests_total{job="shop-api"}[1h])) &lt; 0.995</code></pre>
+
+<div class="trap"><b>Drill: spot the problems.</b> A team wrote these alert rules for their API. Find four problems and say how to fix each.
+<pre><code>- alert: APIErrors
+  expr: http_requests_total{status="500"} &gt; 100
+- alert: APISlow
+  expr: avg(http_request_duration_seconds_sum / http_request_duration_seconds_count) &gt; 1
+  for: 5m
+- alert: HighCPU
+  expr: rate(container_cpu_usage_seconds_total{container="api"}[5m]) &gt; 0.8
+  labels: { severity: page }</code></pre>
+<details><summary>Show the answer</summary>
+<p>1. <b>Raw counter in <code>APIErrors</code></b>: a counter only grows, so after the hundredth error since the Pod started, this fires forever, even if there are no errors now. Use the <em>rate</em> of 5xx errors divided by the rate of all requests, a percentage. Also, <code>status="500"</code> misses 502, 503 and 504: use <code>status=~"5.."</code>. 2. <b>No <code>for:</code> on <code>APIErrors</code></b>: one short spike pages someone. Add a duration, like <code>for: 2m</code>. 3. <b>Average latency in <code>APISlow</code></b>: averages hide the slow requests, and dividing the all-time totals gives an average since the Pod started, not the last few minutes. Use <code>histogram_quantile(0.95, ...)</code> on the rate of the buckets. 4. <b>Paging on CPU</b>: high CPU isn't what users feel, and it can be normal. Show CPU on a dashboard and page on error rate and latency instead. Also accept: no <code>annotations</code> summary, so the person paged doesn't know what's wrong; and <code>HighCPU</code> fires once per Pod (no <code>sum</code>), so one problem sends several pages unless Alertmanager groups them.</p></details>
+</div>
+
+<h2>Practice questions</h2>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (a)</p>
+<p>Users of a train-ticket booking app say seat search is sometimes slow, but the team has no data to confirm it. The team needs:</p>
+<ul class="needs">
+<li>request count, error count and request duration of the search API Pods, and CPU and memory of the nodes</li>
+<li>collected every 30 seconds</li>
+<li>kept as time series for 30 days and queried on demand</li>
+</ul>
+<ol class="asks">
+<li><span class="am">[1]</span>Choose a suitable tool and justify the choice.</li>
+<li><span class="am">[2]</span>Show how it finds and collects data from search API Pods that the Deployment creates and destroys.</li>
+<li><span class="am">[2]</span>Show how the percentage of search requests that failed with a 5xx status over the last 10 minutes is calculated from the collected data.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tool:</b> Prometheus, with node-exporter for node CPU and memory, installed together as kube-prometheus-stack. It's a pull-based time-series database with Kubernetes service discovery, a configurable scrape interval (30 s) and retention (30 days), and a query language (PromQL). A managed service such as CloudWatch Container Insights, well justified, can also earn the choice mark.</li>
+<li><b>Finding Pods:</b> the search API exposes <code>/metrics</code> through a client library. Prometheus watches the Kubernetes API; a ServiceMonitor selects the search Service by label, so Prometheus always knows the current Pods behind it. When the Deployment creates a Pod, it's added as a target; when a Pod is deleted, it's dropped. Nobody edits a list of IPs. Every 30 s Prometheus pulls (scrapes) each Pod's <code>/metrics</code> and stores each value with a timestamp and labels such as <code>pod</code> and <code>status</code>.</li>
+<li><b>Calculation:</b> <code>http_requests_total</code> is a counter that only goes up, so use its rate: how fast it grew over the last 10 minutes, per second. Take the rate for requests whose status is 5xx, summed over all search Pods; divide by the rate for all requests, summed the same way; multiply by 100. <code>sum(rate(http_requests_total{job="search",status=~"5.."}[10m])) / sum(rate(http_requests_total{job="search"}[10m])) * 100</code>. <code>rate</code> also handles counters that go back to zero when a Pod restarts.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and justification 1; dynamic discovery of Pods 2; calculation 2 (counter and rate over a 10-minute window 1, ratio of 5xx to all requests 1). Exact query syntax isn't required.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (b)</p>
+<p>The engineer handling production problems wants:</p>
+<ul class="needs">
+<li>one screen showing request rate, error rate and 99th-percentile latency for each service</li>
+<li>a Slack notification when the search API's 99th-percentile latency stays above 2 seconds for 10 minutes</li>
+</ul>
+<ol class="asks">
+<li><span class="am">[2]</span>Choose suitable tools for the screen and the notification, and show how they connect to the data from part (a).</li>
+<li><span class="am">[1]</span>Describe the alert condition: what is measured, the threshold and the duration.</li>
+<li><span class="am">[1]</span>Show how the alert reaches Slack.</li>
+<li><span class="am">[1]</span>Explain why the alert uses the latency users experience rather than high memory usage.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tools and how they connect:</b> Grafana for the screen; Alertmanager for Slack (Grafana's own alerting with a Slack contact point is also acceptable). Grafana stores no metrics: it uses Prometheus from (a) as a data source and runs a query for each panel (request rate, error rate, p99), with a <code>service</code> drop-down to pick the service. Prometheus evaluates the alert rule every few seconds and sends firing alerts to Alertmanager.</li>
+<li><b>Alert condition:</b> measure the search API's 99th-percentile request duration, calculated from the histogram buckets' rate over the last 5 minutes and summed across Pods (<code>histogram_quantile(0.99, ...)</code>). Threshold: above 2 seconds. Duration: <code>for: 10m</code>, so it fires only if it stays above 2 s for 10 minutes, not for a short spike.</li>
+<li><b>To Slack:</b> Alertmanager's route sends alerts (for example those with <code>severity: page</code>) to a receiver with a <code>slack_configs</code> entry: the incoming-webhook URL, kept in a Secret, and the channel. It groups related alerts into one message and sends a “resolved” message when it's fixed.</li>
+<li><b>Why latency, not memory:</b> alert on symptoms users feel. Slow search is what users feel; high memory may be normal (caches use memory on purpose) and hurts no one. And search can be slow while memory is fine, for example when the database is slow. Show memory on the dashboard to find the cause; page on latency and errors.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and how they connect 2; alert condition with measure, threshold and duration 1; route to Slack 1; symptom-versus-cause reasoning 1. Exact rule syntax isn't required.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (a)</p>
+<p>For every Pod, the team wants its CPU and memory use and the number of container restarts, with 30 days of history for planning next year's cluster size. <code>kubectl top</code> only shows the current values.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Choose a suitable tool and justify the choice.</li>
+<li><span class="am">[2]</span>Show how the Node.js orders API must expose its own measurements so the tool can collect them.</li>
+<li><span class="am">[1]</span>Explain where each Pod's CPU and memory data come from.</li>
+<li><span class="am">[1]</span>Explain where the restart data come from.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tool:</b> Prometheus, with kube-state-metrics and the kubelet's built-in cAdvisor, installed together as kube-prometheus-stack. It's a time-series database with configurable retention (30 days), Kubernetes discovery and a query language. A managed service (CloudWatch Container Insights, Datadog), well justified, can earn the choice mark.</li>
+<li><b>How the API exposes its measurements:</b> the API uses a client library, <code>prom-client</code> for Node.js, to keep counters (requests, errors), histograms (request duration) and gauges in memory, and serves them on an HTTP endpoint, usually <code>/metrics</code>, as plain text: metric name, labels, value. Prometheus finds the Pods through the Kubernetes API (a ServiceMonitor selecting the Service by label) and pulls that endpoint every few seconds.</li>
+<li><b>CPU and memory:</b> from cAdvisor, which is built into the kubelet on every node and measures each container through its cgroups (<code>container_cpu_usage_seconds_total</code>, <code>container_memory_working_set_bytes</code>). Node-level numbers come from node-exporter.</li>
+<li><b>Restarts:</b> from kube-state-metrics, which reads the state of Kubernetes objects from the API server and turns it into metrics, such as <code>kube_pod_container_status_restarts_total</code> and the last termination reason (for example <code>OOMKilled</code>).</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and justification 1; how the API exposes its measurements 2; where CPU and memory data come from 1; where restart data come from 1.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (b)</p>
+<p>Management sets a target: 99.9% of UPI payment requests succeed over every 28-day period. The team needs:</p>
+<ul class="needs">
+<li>a view of progress against the target</li>
+<li>email and Slack notifications to the engineer handling production problems</li>
+<li>related alerts grouped into one message</li>
+<li>alerts switched off during planned maintenance</li>
+</ul>
+<ol class="asks">
+<li><span class="am">[2]</span>Choose suitable tools, and show how they connect to each other.</li>
+<li><span class="am">[1]</span>Describe the alert condition that fires when the success rate over the last 30 minutes falls below 99.9%.</li>
+<li><span class="am">[1]</span>Show how alerts are grouped, and switched off during maintenance.</li>
+<li><span class="am">[1]</span>Show how a notification reaches both email and Slack.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tools and how they connect:</b> Grafana to show progress; Alertmanager for email and Slack, since grouping and silences are its core features. Grafana reads Prometheus from (a) as a data source. Prometheus evaluates the alert rule and sends firing alerts to Alertmanager, which groups them, applies silences and sends them to the receivers.</li>
+<li><b>Progress:</b> 99.9% leaves an error budget of 0.1% of requests over 28 days; with 50 lakh payments, that's 5,000 failures. The dashboard shows the 28-day success ratio as a single number, the budget left as a gauge, and the success rate over time as a graph.</li>
+<li><b>Alert condition:</b> measure the share of payment requests that didn't fail: the rate of non-5xx requests divided by the rate of all requests, over the last 30 minutes. Fire when it's below 0.999 and has stayed below for a few minutes (<code>for: 5m</code>).</li>
+<li><b>Grouping and silences:</b> <code>group_by: [alertname, service]</code> combines related alerts into one message instead of one per Pod. During planned maintenance, a silence matching these alerts is created for a set time, so no notifications are sent; it ends by itself.</li>
+<li><b>Receivers:</b> the route sends to a receiver with both <code>email_configs</code> (the on-call address, through an SMTP server) and <code>slack_configs</code> (webhook URL and channel).</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and how they connect 2; alert condition with measure, threshold and duration 1; grouping and silences 1; email and Slack receivers 1. Exact syntax isn't required.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (a)</p>
+<p>After a release, the 99th-percentile latency of a college ERP's login API rose from 300 ms to 3 s. Engineers need to see the last fourteen days and compare the periods before and after the release.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Choose a suitable tool to collect and store this data, and justify the choice.</li>
+<li><span class="am">[2]</span>Explain which kind of measurement (a counter, a gauge or a histogram) the API must record for request duration, and why.</li>
+<li><span class="am">[2]</span>Show how the 99th-percentile latency is worked out from it.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tool:</b> Prometheus. It keeps time series for as long as its retention allows (14 days or more) and calculates percentiles from histograms. A managed equivalent, well justified, can earn the choice mark.</li>
+<li><b>Counter:</b> only goes up (total logins). <b>Gauge:</b> goes up and down (logins in progress, memory). <b>Histogram:</b> counts how many requests fell into each duration bucket (up to 0.1 s, up to 0.5 s, up to 1 s, up to 5 s…), plus their total count and sum.</li>
+<li><b>Why a histogram:</b> an average hides the slow requests: 98 fast logins and 2 very slow ones still average out “fine”. A percentile needs the spread of durations, which only the buckets keep. And bucket counts from all Pods can be added together, which percentiles each Pod worked out for itself can't.</li>
+<li><b>Working out p99:</b> take how fast each bucket's count grew over a short window (say 5 minutes), add the buckets up across Pods, and find the duration below which 99% of requests fall, estimated within the bucket where that point lies (<code>histogram_quantile(0.99, ...)</code>). Plot it over the last 14 days with a marker at the release time to compare before and after.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and justification 1; counter, gauge and histogram explained, and histogram chosen with the reason 2; how the 99th percentile is worked out 2. Exact syntax isn't required.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes · part (b)</p>
+<p>The team runs a staging and a prod cluster, and wants:</p>
+<ul class="needs">
+<li>one place to view the health of both, with a drop-down list to switch between clusters and namespaces</li>
+<li>a Slack message whenever any Deployment has fewer available replicas than it asks for, for more than 10 minutes</li>
+</ul>
+<ol class="asks">
+<li><span class="am">[2]</span>Choose suitable tools for the view and the notification, and show how they connect to the data from part (a) in both clusters.</li>
+<li><span class="am">[1]</span>Explain how the drop-down list works.</li>
+<li><span class="am">[1]</span>Describe the alert condition for the missing replicas.</li>
+<li><span class="am">[1]</span>Show how the alert reaches Slack.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Tools and how they connect across two clusters:</b> Grafana for the view; Alertmanager (or Grafana's own alerting) for Slack. Each cluster runs its own Prometheus. Grafana has a data source for each, or both send their data to one central store (with Prometheus remote-write, or Thanos or Mimir) with a <code>cluster</code> label on every series. Each Prometheus evaluates the alert rule and sends firing alerts to Alertmanager, which sends them to Slack.</li>
+<li><b>Drop-down list:</b> a Grafana dashboard variable. Its options are read from the data: first the list of clusters, then the namespaces that exist in the chosen cluster (for example from <code>label_values(kube_pod_info{cluster="$cluster"}, namespace)</code>). Every panel's query filters on <code>cluster="$cluster", namespace="$namespace"</code>, so choosing a different item redraws all panels.</li>
+<li><b>Alert condition:</b> for each Deployment, compare the available replicas with the desired replicas, both from kube-state-metrics: <code>kube_deployment_status_replicas_available &lt; kube_deployment_spec_replicas</code>. Fire when this has been true for 10 minutes (<code>for: 10m</code>), naming the cluster, namespace and Deployment in the message.</li>
+<li><b>Slack:</b> Alertmanager's route sends these alerts to a Slack receiver (webhook URL and channel), grouped by cluster and namespace so many Deployments failing at once arrive as one message.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> tool choice and how they connect across two clusters 2; how the drop-down list works 1; alert condition 1; Slack routing 1. Exact syntax isn't required.</p>
+</details></div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking.</p>
+
+<div class="quiz" data-answer="1" data-explain="Prometheus watches the Kubernetes API for Pods behind Services the ServiceMonitor selects by label, so new Pods are scraped and removed Pods dropped without any config change.">
+<p class="q">1. The Deployment scales the API from 2 Pods to 6. What must you change in Prometheus so it scrapes the new Pods?</p>
+<button>Add the 4 new Pod IPs to the scrape config</button>
+<button>Nothing: it finds them through the Kubernetes API, by label</button>
+<button>Restart Prometheus so it reloads the Pod list</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Memory in use goes up and down, so it's a gauge. Counters only increase (totals); histograms count values into buckets.">
+<p class="q">2. Which metric type fits “memory the container is using right now”?</p>
+<button>Gauge</button>
+<button>Counter</button>
+<button>Histogram</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="A percentile needs the spread of durations. A histogram's buckets keep that spread, and bucket counts can be added across Pods.">
+<p class="q">3. Users say “some checkouts are slow”. The average response time looks fine. What do you need?</p>
+<button>A gauge of the current response time</button>
+<button>A lower scrape interval</button>
+<button>A histogram of request durations, to calculate p95 or p99</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Silences are an Alertmanager feature. Prometheus keeps evaluating the rule; Alertmanager suppresses notifications that match the silence until it expires.">
+<p class="q">4. During a planned one-hour maintenance, you don't want Slack messages for <code>ShopApiHighErrorRate</code>. What do you do?</p>
+<button>Delete the alert rule and add it back later</button>
+<button>Create a 1-hour silence in Alertmanager matching that alert</button>
+<button>Scale Prometheus to 0 replicas</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Exit question: “Customers report checkout is slow for some requests. Choose tools to measure it, show it on one screen and alert the on-call engineer in Slack. Explain how the API's Pods are found, how the 5xx percentage over 5 minutes is calculated, and why you alert on that instead of CPU.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>Prometheus for collecting and storing, installed as kube-prometheus-stack with node-exporter and kube-state-metrics; Grafana for the screen; Alertmanager for Slack. The API uses a client library to expose a request counter labelled by status and a request-duration histogram on <code>/metrics</code>. Prometheus pulls that every 15 seconds and keeps 15 days of time series. It finds the Pods through the Kubernetes API, using a ServiceMonitor that selects the API's Service by label, so Pods the Deployment creates or deletes are added or dropped automatically. For the 5xx percentage, take the rate at which the counter grew over the last 5 minutes for 5xx statuses, divide by the rate for all requests, summed across Pods, and multiply by 100. Slowness for some requests comes from the histogram: <code>histogram_quantile(0.95, ...)</code> over the bucket rates gives p95, which an average would hide. Grafana uses Prometheus as its data source for panels showing request rate, error rate and p95. Prometheus evaluates the alert rule, for example error rate above 5% for 2 minutes, and sends it to Alertmanager, which groups related alerts into one Slack message and supports silences for maintenance. I alert on the error rate because that's what users experience: CPU can be high while every request succeeds, and requests can fail with CPU low, for example when the database is down.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> <a href="https://prometheus.io/docs/introduction/overview/">Prometheus overview</a>, <a href="https://prometheus.io/docs/concepts/metric_types/">Metric types</a>, <a href="https://prometheus.io/docs/practices/histograms/">Histograms and summaries</a> (up to “Quantiles”), and the <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE book chapter on monitoring</a> (the “four golden signals” section). About 40 minutes.</p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask Claude, for example “what are logs and traces, and how do Loki and OpenTelemetry fit next to Prometheus?” or paste a PromQL query you can't read. Tell Claude how the drill went. To revise, go back to the drills and practice questions in lessons 9–18 and try each one again without looking.</div>
+
+<nav class="course"><a href="0017-ansible.html">← Lesson 17: Configuration management</a><span></span></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

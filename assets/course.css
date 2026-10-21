@@ -92,3 +92,13 @@ h2 .lab-time{margin-bottom:2px}
 .schedule td:first-child{font:600 .78rem "JetBrains Mono",monospace;white-space:nowrap;color:var(--muted)}
 .trap{border:1px solid var(--bad);border-radius:8px;padding:12px 16px;margin:1.2em 0;font-size:.94rem}
 .trap b{color:var(--bad)}
+
+/* Practice questions (lessons 9+) */
+.practice-q{border:1px solid var(--accent);border-radius:8px;padding:14px 18px;margin:1.4em 0;font-size:.95rem}
+.practice-q .meta{font:600 .7rem "JetBrains Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:0 0 .6em}
+.practice-q details ul{margin:.4em 0;padding-left:1.2em}
+.practice-q .marking{border-top:1px solid var(--rule);padding-top:.5em;color:var(--muted);font-size:.88rem}
+.practice-q ul.needs{margin:.3em 0 .6em;padding-left:1.3em}
+.practice-q ol.asks{list-style:lower-roman;margin:.6em 0;padding-left:2em}
+.practice-q ol.asks li{margin:.3em 0}
+.practice-q .am{float:right;margin-left:1em;font:600 .78rem "JetBrains Mono",monospace;color:var(--muted)}

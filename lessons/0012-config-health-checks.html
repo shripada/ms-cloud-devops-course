@@ -1,0 +1,343 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Config and health checks</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 12</div>
+<h1>Config &amp; health checks</h1>
+
+<h2>Why this matters for DevOps</h2>
+<p>Your college fest app runs in three places: your laptop, a staging cluster and production. The code is the same everywhere, but the database password, the payment gateway URL and the log level are different. If you bake those into the image, you need three images, and the production password ends up inside every copy of the image on Docker Hub. The rule at work: <b>build one image, and give it its settings from outside</b>.</p>
+<p>The second problem: Kubernetes only knows that your container's process is running. It doesn't know if the app inside is stuck, or still loading, or ready for users. Probes are how you tell it. Without them, a rolling update (next lesson) sends users to Pods that can't answer yet.</p>
+
+<h2>Three ideas, no more</h2>
+<p><b>ConfigMap vs Secret</b>: both are small key–value objects that a Pod reads as environment variables or as files. Use a <em>ConfigMap</em> for normal settings anyone on the team may see: <code>LOG_LEVEL</code>, a payment gateway URL, a feature flag. Use a <em>Secret</em> for anything that would hurt if it leaked: passwords, API keys, tokens. <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">[Kubernetes docs: ConfigMaps]</a> <a href="https://kubernetes.io/docs/concepts/configuration/secret/">[Secrets]</a></p>
+<p><b>base64 is not encryption</b>: a Secret's values are stored as base64, which is just a way to write any bytes as plain letters. Anyone can decode it with one command, no key needed. What actually protects a Secret is <em>who is allowed to read it</em> (RBAC rules on the API server), encrypting etcd on disk, and never committing the plain value to Git. Treat a Secret as “kept separately so access can be controlled”, not “scrambled”.</p>
+<p><b>Three probes</b>: the kubelet on each node runs these checks against your container. <a href="https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/">[Kubernetes docs: Probes]</a></p>
+<table>
+<tr><th>Probe</th><th>Question it asks</th><th>When it fails</th></tr>
+<tr><td><code>livenessProbe</code></td><td>Is the app stuck?</td><td>The kubelet <b>restarts</b> the container</td></tr>
+<tr><td><code>readinessProbe</code></td><td>Can it serve users right now?</td><td>The Pod is <b>removed from the Service's endpoints</b>; no restart</td></tr>
+<tr><td><code>startupProbe</code></td><td>Has it finished starting?</td><td>Liveness and readiness wait until it passes; if it never passes in time, restart</td></tr>
+</table>
+<p class="aside">Think of the college canteen. <em>Liveness</em>: is the cook awake? If not, replace the cook. <em>Readiness</em>: is food ready to serve? If not, don't send students to that counter yet, but don't fire the cook either. <em>Startup</em>: the morning dosa batter takes 40 minutes; don't ask “are you awake?” every 5 seconds during that time.</p>
+
+<h2>Before you start</h2>
+<p>You need the three-node cluster from <a href="0009-your-first-cluster.html">lesson 9</a> and your <code>~/k8s-practice</code> folder from <a href="0011-manifests-apply.html">lesson 11</a>. Check the cluster is up and <code>default</code> is clean:</p>
+<pre><code>kubectl get nodes
+kubectl get all
+cd ~/k8s-practice</code></pre>
+
+<h2>Do it: config</h2>
+<ol class="steps">
+<li>Create a ConfigMap and a Secret. Here imperative commands are fine for a quick test; at work these would be files too.
+<pre><code>kubectl create configmap app-config \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=PAYMENT_GATEWAY_URL=https://pay.example.com
+kubectl create secret generic db-secret --from-literal=DB_PASSWORD=Fest2026
+kubectl get configmap app-config -o yaml</code></pre>
+The ConfigMap shows your values in plain text, under <code>data:</code>.</li>
+<li>Now look at the Secret, and decode it:
+<pre><code>kubectl get secret db-secret -o yaml
+kubectl get secret db-secret -o jsonpath='{.data.DB_PASSWORD}' | base64 -d; echo</code></pre>
+The YAML shows <code>DB_PASSWORD: RmVzdDIwMjY=</code>. One command later you have <code>Fest2026</code> back. No key, no password. That's base64: an encoding, not a lock. If you can read the Secret object, you can read the password, so the real protection is controlling who can read Secrets.</li>
+<li>Write a small app that prints its settings. Create <code>cfg.yaml</code>:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cfg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cfg
+  template:
+    metadata:
+      labels:
+        app: cfg
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo LOG_LEVEL=$LOG_LEVEL URL=$PAYMENT_GATEWAY_URL password_length=${#DB_PASSWORD}; sleep 5; done"]
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: DB_PASSWORD</code></pre>
+<code>envFrom</code> turns every key in the ConfigMap into an environment variable. <code>secretKeyRef</code> picks one key from the Secret. The app prints only the password's <em>length</em>: never print a secret in logs.
+<pre><code>kubectl apply -f cfg.yaml
+kubectl logs deploy/cfg --tail=2</code></pre>
+You see <code>LOG_LEVEL=info</code> and <code>password_length=8</code>.</li>
+<li>Change the setting while the app runs. <b>Predict first:</b> after you edit the ConfigMap, will the running app print <code>debug</code>?
+<pre><code>kubectl create configmap app-config --from-literal=LOG_LEVEL=debug \
+  --from-literal=PAYMENT_GATEWAY_URL=https://pay.example.com \
+  --dry-run=client -o yaml | kubectl apply -f -
+sleep 10; kubectl logs deploy/cfg --tail=1</code></pre>
+Still <code>info</code>. Environment variables are copied into the process once, when the container starts, just like in any Linux program. Editing the ConfigMap doesn't touch a running process. Restart the Pods to pick up the change:
+<pre><code>kubectl rollout restart deployment/cfg
+kubectl rollout status deployment/cfg
+kubectl logs deploy/cfg --tail=1</code></pre>
+Now it says <code>debug</code>. (A ConfigMap mounted as a <em>file</em> does get updated inside the Pod after a short delay, but the app still has to re-read the file. Most apps don't, so plan for a restart either way.)</li>
+<li>Break it on purpose. Edit <code>cfg.yaml</code> and change <code>key: DB_PASSWORD</code> to <code>key: password</code>, a key that doesn't exist in the Secret. Apply and watch:
+<pre><code>kubectl apply -f cfg.yaml
+kubectl get pods -l app=cfg</code></pre>
+The new Pod shows <code>CreateContainerConfigError</code>. Run <code>kubectl describe pod -l app=cfg</code> and read the last event: <code>couldn't find key password in Secret default/db-secret</code>. The old Pod keeps running, so users are safe. Put the key back to <code>DB_PASSWORD</code>, apply, and clean up: <code>kubectl delete -f cfg.yaml</code>.</li>
+</ol>
+
+<h2>Do it: health checks</h2>
+<ol class="steps" start="6">
+<li>Watch liveness restart a stuck app. This test image from the Kubernetes docs answers <code>/healthz</code> with 200 for its first 10 seconds, then with 500 forever, like an app that hangs. Create <code>liveness.yaml</code>:
+<pre><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness
+spec:
+  containers:
+    - name: app
+      image: registry.k8s.io/e2e-test-images/agnhost:2.40
+      args: ["liveness"]
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+        initialDelaySeconds: 3
+        periodSeconds: 3</code></pre>
+<pre><code>kubectl apply -f liveness.yaml
+kubectl get pod liveness -w</code></pre>
+After about 20 seconds, <code>RESTARTS</code> goes to 1, then 2. Press Ctrl+C and run <code>kubectl describe pod liveness</code>: the events say <code>Liveness probe failed: HTTP probe failed with statuscode: 500</code> and <code>Container app failed liveness probe, will be restarted</code>. The process never crashed; the probe found it broken. Delete it: <code>kubectl delete -f liveness.yaml</code>.</li>
+<li>Now the most common probe mistake at work. This app takes 30 seconds to start, like an API warming up its cache. Create <code>slow.yaml</code>:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: slow
+  template:
+    metadata:
+      labels:
+        app: slow
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          command: ["sh", "-c", "sleep 30; echo ok > /usr/share/nginx/html/ready; exec nginx -g 'daemon off;'"]
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slow
+spec:
+  selector:
+    app: slow
+  ports:
+    - port: 80</code></pre>
+<b>Predict first:</b> the liveness probe starts at 5 seconds and allows 3 failures, 5 seconds apart. The app needs 30 seconds. What happens?
+<pre><code>kubectl apply -f slow.yaml
+kubectl get pods -l app=slow -w</code></pre>
+The Pods restart every ~20 seconds and never become <code>1/1</code>. The probe gives up at about 5 + 3×5 = 20 seconds, kills the container, and the 30-second start begins again. Soon the status shows <code>CrashLoopBackOff</code>. The app is fine; the probe is wrong.</li>
+<li>Fix it with a startup probe and a readiness probe. In <code>slow.yaml</code>, replace the whole <code>livenessProbe:</code> block with:
+<pre><code>          startupProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 80
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 10
+            failureThreshold: 3</code></pre>
+The startup probe allows 12 × 5 = 60 seconds to start. Until it passes, liveness and readiness don't run. After that, liveness checks “still alive?” every 10 seconds, and readiness checks <code>/ready</code>.
+<pre><code>kubectl apply -f slow.yaml
+kubectl get pods -l app=slow -w</code></pre>
+The new Pods sit at <code>0/1 Running</code> for about 30 seconds, then turn <code>1/1</code>, with 0 restarts.</li>
+<li>Watch readiness take a Pod out of traffic without restarting it. Pick one Pod and delete its <code>ready</code> file, as if it lost its database connection:
+<pre><code>kubectl get endpointslices -l kubernetes.io/service-name=slow
+POD=$(kubectl get pods -l app=slow -o jsonpath='{.items[0].metadata.name}')
+kubectl exec $POD -- rm /usr/share/nginx/html/ready
+sleep 20
+kubectl get pods -l app=slow
+kubectl get endpointslices -l kubernetes.io/service-name=slow</code></pre>
+That Pod is <code>0/1</code> but <code>RESTARTS</code> is still 0, and the EndpointSlice now lists only one IP. The Service stops sending users to it, and nothing is killed. Put the file back (<code>kubectl exec $POD -- sh -c 'echo ok &gt; /usr/share/nginx/html/ready'</code>) and it rejoins. Clean up: <code>kubectl delete -f slow.yaml</code>, then <code>kubectl delete configmap app-config</code> and <code>kubectl delete secret db-secret</code>.</li>
+</ol>
+
+<div class="trap"><b>Drill: spot the problems.</b> A canteen-ordering API reads <code>MENU_URL</code>, <code>LOG_LEVEL</code> and <code>UPI_API_KEY</code>. It takes about 45 seconds to load the day's menu before it can serve orders. Find four problems in this part of its Deployment, and say what each one causes.
+<pre><code>env:
+  - name: UPI_API_KEY
+    value: sk_live_9f8e7d6c          # in the manifest, in Git
+envFrom:
+  - configMapRef: { name: canteen-config }
+livenessProbe:
+  httpGet: { path: /healthz, port: 8000 }
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 2</code></pre>
+<details><summary>Show the answer</summary>
+<p>1. <b>The API key is written in the manifest</b>, so it sits in Git history forever, readable by anyone with the repo. Put it in a Secret (created outside Git, or encrypted in Git) and use <code>secretKeyRef</code>.<br>
+2. <b>No readiness probe</b>: the Pod gets traffic as soon as its container starts, so for 45 seconds users get errors, and during a rolling update the old Pods are removed while the new ones can't answer. Add a <code>readinessProbe</code>.<br>
+3. <b>The liveness probe kills the app before it can start</b>: 10 + 2 × 5 = 20 seconds, but it needs 45. The Pod restarts forever (CrashLoopBackOff). Add a <code>startupProbe</code> with enough budget, e.g. <code>periodSeconds: 5, failureThreshold: 12</code> (60 seconds).<br>
+4. <b>Changing <code>canteen-config</code> won't reach running Pods</b>: env vars are read once at start. After editing the ConfigMap, run <code>kubectl rollout restart</code> (or change something in the Pod template) so new Pods pick it up.</p></details>
+</div>
+
+<h2>Practice questions</h2>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A food-delivery API reads four settings: <code>RESTAURANT_SEARCH_URL</code>, <code>CACHE_TTL_SECONDS</code>, <code>SMS_GATEWAY_TOKEN</code> and <code>DB_PASSWORD</code>.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Analyze which belong in a ConfigMap and which in a Secret, and why.</li>
+<li><span class="am">[1]</span>Analyze why the base64 encoding used in a Secret is not encryption.</li>
+<li><span class="am">[1]</span>Explain what actually protects a Secret.</li>
+<li><span class="am">[2]</span>Examine what happens to running Pods when the ConfigMap is edited to change <code>CACHE_TTL_SECONDS</code>.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>ConfigMap:</b> <code>RESTAURANT_SEARCH_URL</code> and <code>CACHE_TTL_SECONDS</code>. They aren't sensitive; anyone on the team may read them, and they can be kept in Git with the manifests.</li>
+<li><b>Secret:</b> <code>SMS_GATEWAY_TOKEN</code> and <code>DB_PASSWORD</code>. Anyone who has them can send SMS on the company's bill or read the database. A Secret is a separate object type, so access can be limited to it on its own, and kubectl doesn't print its values in <code>describe</code>.</li>
+<li><b>base64 isn't encryption:</b> it's an encoding, there to carry any bytes safely in YAML. There's no key; anyone runs <code>base64 -d</code> and reads the value.</li>
+<li><b>What protects a Secret:</b> RBAC rules that let only the people and ServiceAccounts who need it <code>get</code> Secrets; encryption at rest in etcd (on EKS, with a KMS key); and keeping the plain value out of Git, for example by creating it from AWS Secrets Manager, Sealed Secrets or an Ansible Vault file.</li>
+<li><b>Editing the ConfigMap:</b> environment variables are read once when the container starts, so running Pods keep the old <code>CACHE_TTL_SECONDS</code>. New Pods get the new value: run <code>kubectl rollout restart deployment</code> to replace them gradually. (If the ConfigMap were mounted as files, the files would update after a minute or so, but the app would still have to re-read them.)</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> correct split with reasons 1; base64 isn't encryption 1; what protects a Secret 1; what happens to running Pods when the ConfigMap is edited 2.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A train-ticket booking API needs about 60 seconds to load seat maps into memory before it can serve requests. With the liveness probe below, its Pods never become Ready and their restart count keeps rising.</p>
+<pre><code>livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3</code></pre>
+<ol class="asks">
+<li><span class="am">[2]</span>Analyze why the Pods keep restarting.</li>
+<li><span class="am">[2]</span>Differentiate between liveness, readiness and startup probes.</li>
+<li><span class="am">[1]</span>State how to fix the configuration.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>Why:</b> the first check is at 10 s, then every 10 s. While the seat maps are loading, <code>/healthz</code> doesn't answer, so the checks at about 10, 20 and 30 s fail. After 3 failures (about 30 s) the kubelet kills the container and restarts it, long before the 60 s it needs. Every start is killed the same way, so the Pod never becomes Ready and ends in <code>CrashLoopBackOff</code>.</li>
+<li><b>Liveness:</b> “is the process stuck?” If it fails, the kubelet restarts the container. <b>Readiness:</b> “can it serve traffic now?” If it fails, the Pod is removed from the Service's endpoints but not restarted. <b>Startup:</b> “has it finished starting?” Liveness and readiness checks wait until it succeeds, which protects slow starters.</li>
+<li><b>Fix:</b> add a startup probe with a budget longer than 60 s, for example <code>periodSeconds: 10</code> and <code>failureThreshold: 9</code> (90 s); add a readiness probe so traffic arrives only when the seat maps are loaded; keep the liveness probe for later hangs.</li>
+</ul>
+<pre><code>startupProbe:
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+  failureThreshold: 9
+readinessProbe:
+  httpGet: { path: /ready, port: 8080 }
+  periodSeconds: 5
+livenessProbe:
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+  failureThreshold: 3</code></pre>
+<p class="marking"><b>Marking (5):</b> why the Pods restart, with the timing 2; the three probe types 2; fix with a startup probe 1. Raising the liveness probe's initial delay above 60 s also earns the fix mark if explained.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>The Deployment below is for a hostel mess-menu API that listens on port 8080. The Secret <code>mess-db</code> has a single key, <code>DB_PASS</code>.</p>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata: { name: menu-api }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: menu-api } }
+  template:
+    metadata: { labels: { app: menu-api } }
+    spec:
+      containers:
+      - name: api
+        image: ghcr.io/hostel/menu-api:2.1.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef: { name: mess-db, key: password }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 80 }
+        resources:
+          requests: { cpu: "2" }
+          limits:   { cpu: "1" }</code></pre>
+<ol class="asks">
+<li><span class="am">[3]</span>Detect any three errors, and state the fix for each.</li>
+<li><span class="am">[2]</span>Explain the symptom each error causes in the cluster.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>CPU request bigger than the limit</b> (2 vs 1). Symptom: the API server rejects the Deployment on apply: <code>must be less than or equal to cpu limit of 1</code>. No Pods are created at all. Fix: request no more than the limit, for example <code>requests: 250m</code>, <code>limits: 1</code>. The next two errors show up once this one is fixed.</li>
+<li><b>Wrong Secret key</b>: the Secret's key is <code>DB_PASS</code>, not <code>password</code>. Symptom: Pods stay in <code>CreateContainerConfigError</code>; <code>kubectl describe pod</code> shows <code>couldn't find key password in Secret</code>. Fix: <code>key: DB_PASS</code>.</li>
+<li><b>Readiness probe on the wrong port</b> (80; the app listens on 8080). Symptom: Pods are Running but <code>0/1</code> Ready, events show <code>Readiness probe failed: connection refused</code>, the Service has no endpoints, and callers get errors. Fix: <code>port: 8080</code>.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> three errors, each with its fix 3 (1 each); symptoms explained for all three 2. A correct description of each fix earns the mark.</p>
+</details></div>
+
+<h2>Check yourself</h2>
+<p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
+
+<div class="quiz" data-answer="2" data-explain="The value is base64-encoded, and base64 -d gives it back without any key. Access control (RBAC), encrypting etcd and keeping it out of Git are what protect it.">
+<p class="q">1. A teammate says, “It's safe to commit the Secret YAML to Git, the password is encrypted.” What's wrong?</p>
+<button>Nothing, Kubernetes encrypts Secret YAML with the cluster key</button>
+<button>Secrets are encrypted, but only with a weak algorithm</button>
+<button>The value is only base64-encoded; anyone can decode it</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="0" data-explain="Readiness failure removes the Pod from the Service's endpoints. It does not restart anything. Liveness failure is the one that restarts.">
+<p class="q">2. A Pod's <em>readiness</em> probe starts failing. What does Kubernetes do?</p>
+<button>Stops sending it Service traffic, but doesn't restart it</button>
+<button>Restarts the container</button>
+<button>Deletes the Pod and creates a new one on another node</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="1" data-explain="Env vars are copied into the process when it starts. The running Pods keep the old value until they are restarted, for example with kubectl rollout restart.">
+<p class="q">3. You change <code>LOG_LEVEL</code> in a ConfigMap that a Deployment reads with <code>envFrom</code>. What happens to the running Pods?</p>
+<button>They see the new value within a minute</button>
+<button>Nothing, until the Pods are restarted</button>
+<button>They restart automatically</button>
+<div class="fb"></div></div>
+
+<div class="quiz" data-answer="2" data-explain="A startup probe holds back liveness until the app has started, with its own budget (periodSeconds × failureThreshold). It's made for exactly this case.">
+<p class="q">4. An app needs 90 seconds to start, then should be restarted quickly if it hangs. Which probe solves the slow start?</p>
+<button>A bigger <code>periodSeconds</code> on the liveness probe</button>
+<button>A readiness probe</button>
+<button>A startup probe</button>
+<div class="fb"></div></div>
+
+<div class="quiz recall">
+<p class="q">5. Exit question (say it out loud or type it): “What's the difference between liveness, readiness and startup probes? Give one example of each going wrong.”</p>
+<textarea placeholder="Your answer, from memory…"></textarea>
+<details><summary>Compare with a model answer</summary>
+<p>All three are checks the kubelet runs against a container. A <b>liveness</b> probe asks “is the app stuck?”; if it fails enough times, the kubelet restarts the container. Example: a Node.js app with a deadlock still has a running process, so without liveness it would sit broken forever. A <b>readiness</b> probe asks “can it serve users right now?”; if it fails, the Pod is taken out of the Service's endpoints, but it's not restarted. Example: without readiness, during a rolling update users are sent to new Pods that are still loading and get errors. A <b>startup</b> probe asks “has it finished starting?”; liveness and readiness wait until it passes. Example: an API that warms its cache for 40 seconds, with only a liveness probe that gives up after 20 seconds, gets restarted forever and never becomes ready. The fix is a startup probe with a long enough budget.</p></details>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> the Kubernetes task <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Configure Liveness, Readiness and Startup Probes</a> (the image in step 6 comes from there), and the “Information security for Secrets” section of <a href="https://kubernetes.io/docs/concepts/configuration/secret/">Secrets</a>. About 20 minutes.</p>
+
+<div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude), for example “how do teams keep Secrets in Git safely?” or “should liveness and readiness use the same endpoint?”. Tell Claude how the drill went so lesson 13 (updates and releases) is pitched right.</div>
+
+<nav class="course"><a href="0011-manifests-apply.html">← Lesson 11: Manifests &amp; apply</a><a href="0013-updates-releases.html">Lesson 13: Updates &amp; releases →</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

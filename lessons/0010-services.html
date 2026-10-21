@@ -2,7 +2,6 @@
 <title>Kubernetes Services</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
 <div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 10</div>
 <h1>Services</h1>
-<p class="lede">Today's goal: give three changing Pods one fixed name and address, call them by name from inside the cluster, watch requests get shared between Pods, and open the app to your laptop with a LoadBalancer. About 30 minutes.</p>
 
 <h2>Why this matters for DevOps</h2>
 <p>In lesson 9 you saw that a replaced Pod gets a new name <em>and a new IP</em>. Now think about the app you will deploy in this module: a React frontend that calls an Express backend, which talks to PostgreSQL. The backend runs as three Pods, and any of them can be replaced at any moment. Which IP should the frontend call? One Pod's IP might be gone in five minutes. A list of all three keeps changing.</p>
@@ -40,6 +39,51 @@ Note the three Pod IPs. Pods on the same node share a range, for example <code>1
 kubectl get service who -o wide
 kubectl get endpointslices -l kubernetes.io/service-name=who</code></pre>
 <code>expose</code> copies the Deployment's selector, <code>app=who</code>, into the Service. The ClusterIP looks like <code>10.96.x.x</code>, a different range from the Pods. It's a virtual address that only Services use. The <code>ENDPOINTS</code> column lists exactly the three Pod IPs from step 1.</li>
+<li>Before looking at the Service, look at the Deployment it points to. Kubernetes stores every object as structured data, and <code>-o yaml</code> prints it in a format called YAML:
+<pre><code>kubectl get deployment who -o yaml</code></pre>
+The output is long, because Kubernetes adds many fields of its own. Trimmed to the parts that matter, it looks like this:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: who
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: who
+  template:
+    metadata:
+      labels:
+        app: who
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami</code></pre>
+Indentation shows what belongs to what: <code>replicas</code>, <code>selector</code> and <code>template</code> are all inside <code>spec</code>. A line starting with <code>-</code> is one item in a list. <code>containers</code> is a list because one Pod can run several containers. You'll recognise the <code>--replicas=3</code> and <code>--image</code> you typed in step 1. <code>template</code> is the blueprint for each Pod, and its <code>labels</code> give every Pod the label <code>app=who</code>. Remember that label: the Service is about to use it.</li>
+<li>Now see what <code>expose</code> created, in the same way:
+<pre><code>kubectl get service who -o yaml</code></pre>
+Trimmed:
+<pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: who
+spec:
+  type: ClusterIP
+  clusterIP: 10.96.143.20
+  selector:
+    app: who
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80</code></pre>
+<code>ports</code> is a list because one Service can open several ports. Now read <code>spec</code>:
+<ul>
+<li><code>type: ClusterIP</code>: the default type, reachable only inside the cluster.</li>
+<li><code>selector: app: who</code>: send traffic to Pods with the label <code>app=who</code>, the label from the Deployment's <code>template</code> in step 3.</li>
+<li><code>port: 80</code>: the port the Service listens on. Clients call <code>who:80</code>, and <code>http://who</code> means port 80.</li>
+<li><code>targetPort: 80</code>: the port inside the container that traffic is forwarded to. Here they happen to be the same. Step 8 makes them different.</li>
+</ul>
+<code>kubectl expose</code> is just a quick way of writing this object for you. In lesson 11 you will write files like this yourself.</li>
 <li>A ClusterIP Service is only reachable from inside the cluster, so start a throwaway Pod to act as a client. <code>-it</code> gives you a shell inside it, and <code>--rm</code> deletes the Pod when you exit:
 <pre><code>kubectl run tmp --rm -it --image=busybox:1.36 -- sh</code></pre>
 At the <code>/ #</code> prompt, call the Service by name a few times:
@@ -68,7 +112,18 @@ The endpoints show <code>&lt;unset&gt;</code>, and <code>wget</code> fails with 
 kubectl get service who-lb</code></pre>
 <i>Option 1 (Docker Desktop):</i> the <code>EXTERNAL-IP</code> fills in within a few seconds, and Docker Desktop also forwards the port to your laptop. Open <a href="http://localhost:8099">http://localhost:8099</a> and refresh a few times. The <code>Hostname</code> line changes as different Pods answer.<br>
 <i>Option 2 (minikube):</i> in a separate terminal, run <code>minikube tunnel</code> and leave it running (it may ask for your password). Then open <a href="http://localhost:8099">http://localhost:8099</a>.<br>
-Look at the <code>PORT(S)</code> column: something like <code>8099:31233/TCP</code>. The second number is a NodePort. A LoadBalancer Service is built on top of a NodePort: the external load balancer sends traffic to that port on the nodes, and kube-proxy takes it from there. On AWS the load balancer is a real AWS one. On your laptop, Docker Desktop plays that role. You can't open the NodePort yourself on this setup, because the nodes live inside Docker Desktop's virtual machine.</li>
+Look at the <code>PORT(S)</code> column: something like <code>8099:31233/TCP</code>. The second number is a NodePort. A LoadBalancer Service is built on top of a NodePort: the external load balancer sends traffic to that port on the nodes, and kube-proxy takes it from there. On AWS the load balancer is a real AWS one. On your laptop, Docker Desktop plays that role. You can't open the NodePort yourself on this setup, because the nodes live inside Docker Desktop's virtual machine.<br>
+Print this Service as YAML too, with <code>kubectl get service who-lb -o yaml</code>. Its <code>spec</code>, trimmed:
+<pre><code>spec:
+  type: LoadBalancer
+  selector:
+    app: who
+  ports:
+    - nodePort: 31233
+      port: 8099
+      protocol: TCP
+      targetPort: 80</code></pre>
+Kubernetes prints fields in alphabetical order, so <code>nodePort</code> comes first. Three different ports, three different jobs: <code>port</code> (8099) is where the Service listens, <code>targetPort</code> (80) is where the container listens, and <code>nodePort</code> (31233) is the port opened on every node. You didn't ask for a nodePort, so Kubernetes picked a free one between 30000 and 32767. In a YAML file you can choose it yourself, for example <code>nodePort: 30090</code>.</li>
 <li>Clean up. The Services don't belong to the Deployment, so delete them separately:
 <pre><code>kubectl delete deployment who
 kubectl delete service who who-lb
@@ -76,6 +131,65 @@ kubectl get all</code></pre>
 Only the built-in <code>kubernetes</code> Service should remain. It's how Pods inside the cluster reach the API server.</li>
 </ol>
 <div class="box"><b>Stretch:</b> the most common Service bug at work is a selector that matches no Pods, often from a typo in a label. Create the <code>who</code> Deployment again, then make a Service by hand: <code>kubectl create service clusterip broken --tcp=80:80</code>. Run <code>kubectl describe service broken</code>, then answer: what is its selector, why are its endpoints empty, and how would you fix it? (Hint: compare with <code>kubectl get pods --show-labels</code>.)</div>
+
+<h2>Service fields at a glance</h2>
+<p>Everything you need to read a Service written as YAML. All of these fields sit under <code>spec</code>.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th><th>If you leave it out</th></tr>
+<tr><td><code>type</code></td><td><code>ClusterIP</code>, <code>NodePort</code> or <code>LoadBalancer</code>: how far outside the cluster the Service can be reached</td><td><code>ClusterIP</code></td></tr>
+<tr><td><code>selector</code></td><td>The labels a Pod must carry to receive traffic. If it lists two labels, a Pod needs both.</td><td>No Pods are picked, so the endpoints stay empty</td></tr>
+<tr><td><code>ports[].port</code></td><td>The port the Service listens on. Clients call <code>name:port</code>.</td><td>Required</td></tr>
+<tr><td><code>ports[].targetPort</code></td><td>The port the container listens on. Traffic is forwarded there.</td><td>Same as <code>port</code></td></tr>
+<tr><td><code>ports[].nodePort</code></td><td>Only for NodePort and LoadBalancer: the port opened on every node, between 30000 and 32767</td><td>Kubernetes picks a free one</td></tr>
+</table>
+
+<h2>Practice questions</h2>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A college fest website has a React frontend that must be reachable from the internet, a Django API used by the frontend, and a MySQL database used only by the API.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Analyze the Service types ClusterIP, NodePort and LoadBalancer.</li>
+<li><span class="am">[3]</span>Choose one for each of the three components, and justify each choice.</li>
+<li><span class="am">[1]</span>Explain how the API Pod reaches the database using the name <code>mysql.fest.svc.cluster.local</code>.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>The three types:</b> <em>ClusterIP</em> (the default) gives a fixed name and IP that work only inside the cluster. <em>NodePort</em> also opens a port between 30000 and 32767 on every node. <em>LoadBalancer</em> also puts an external load balancer in front, so users outside the cluster can reach it.</li>
+<li><b>Frontend: LoadBalancer.</b> It's the only part users must reach from the internet. On AWS this creates a real load balancer with one public address.</li>
+<li><b>Django API: ClusterIP.</b> Only the frontend calls it, from inside the cluster, so there's no reason to open it to the outside.</li>
+<li><b>MySQL: ClusterIP.</b> Only the API uses it. A database open to the internet invites attacks and data theft.</li>
+<li><b>How the name works:</b> CoreDNS, the cluster's own DNS server, turns <code>mysql.fest.svc.cluster.local</code> (Service <code>mysql</code>, namespace <code>fest</code>, then the cluster suffix) into the Service's ClusterIP. The API connects to that IP on port 3306, and kube-proxy's rules send the connection on to a MySQL Pod. If the MySQL Pod is replaced, the name and the ClusterIP stay the same. From inside the <code>fest</code> namespace, just <code>mysql</code> works.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> three Service types 1; choice and justification for each component 3 (1 each); how the name resolves 1.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>The frontend of an exam-results website runs as three replicas behind a NodePort Service on node port 31000.</p>
+<ol class="asks">
+<li><span class="am">[3]</span>With a diagram, analyze the path a browser request takes from the node's port through kube-proxy and the Service to one of the Pods.</li>
+<li><span class="am">[2]</span>Examine what happens to requests if the node running one of the Pods fails.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<pre><code>Browser ──► http://&lt;any node IP&gt;:31000
+               │
+        ┌──────▼───────── Node A ──────────────┐
+        │ kube-proxy's rules catch port 31000  │
+        │ and pick one Pod from the Service's  │
+        │ EndpointSlice                        │
+        └──────┬──────────────┬──────────────┬─┘
+               ▼              ▼              ▼
+         Pod 10.244.1.5  Pod 10.244.1.6  Pod 10.244.2.8 (on Node B)
+           :8080           :8080           :8080   (targetPort)</code></pre>
+<ul>
+<li><b>Path:</b> the browser connects to port 31000 on any node's IP. Every node opens this port, even a node with no frontend Pod on it. kube-proxy has written rules on each node that catch traffic to port 31000 and pick one of the Pods in the Service's EndpointSlice. The request goes to that Pod's IP on the <code>targetPort</code>, 8080, even if the Pod is on another node. The reply comes back the same way. Because a different Pod can be picked for each request, the three replicas share the load.</li>
+<li><b>A node running one Pod fails:</b> if the browser was using <em>that</em> node's IP, its requests fail, because nothing answers there. That's why real setups put a load balancer in front, which sends traffic only to working nodes. Requests through the other nodes keep working. For a short time some may still be sent to the dead Pod, until Kubernetes notices the node is down and removes that Pod from the EndpointSlice. Then all traffic goes to the two remaining Pods. As in lesson 9, the Deployment creates a replacement Pod on a healthy node, and it joins the EndpointSlice once it's running.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> traffic path with diagram 3; node failure analysis 2.</p>
+</details></div>
 
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
@@ -101,7 +215,7 @@ Only the built-in <code>kubernetes</code> Service should remain. It's how Pods i
 <button>The Service needs a LoadBalancer type</button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="0" data-explain="Frontend to backend is traffic inside the cluster, so a ClusterIP Service is enough. Only what users reach from outside needs a LoadBalancer (or, from lesson 16, an Ingress).">
+<div class="quiz" data-answer="0" data-explain="Frontend to backend is traffic inside the cluster, so a ClusterIP Service is enough. Only what users reach from outside needs a LoadBalancer.">
 <p class="q">4. Your React frontend Pods call your Express backend Pods inside the cluster. Which Service type should the backend use?</p>
 <button>ClusterIP</button>
 <button>NodePort</button>

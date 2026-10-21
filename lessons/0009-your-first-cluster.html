@@ -2,7 +2,6 @@
 <title>Your First Cluster</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
 <div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 09</div>
 <h1>Your first cluster</h1>
-<p class="lede">Today's goal: start a Kubernetes cluster on your Mac, run nginx in it, kill a Pod and watch Kubernetes bring it back by itself, then scale to three copies. About 30 minutes.</p>
 
 <h2>Why this matters for DevOps</h2>
 <p>In module 1 you ran an app and a database with Docker Compose. That works well on one machine. Now think about a real company like IRCTC during Tatkal booking at 10 a.m. They need 50 copies of the booking service spread across many servers. When a server dies, its copies must start again somewhere else in seconds. When new code ships, the old copies must be replaced one by one, so nobody sees an error page. Compose cannot do any of this. Its job is “start these containers on this machine”. Nothing in Compose watches over them afterwards.</p>
@@ -102,6 +101,82 @@ kubectl get pods</code></pre>
 Leave the cluster running for the next lesson. To free memory on option 1, stop the cluster from Docker Desktop's Kubernetes view. On option 2, <code>minikube stop</code> pauses the cluster and <code>minikube start</code> brings it back.</li>
 </ol>
 <div class="box"><b>Stretch:</b> while the <code>--watch</code> terminal is open, run <code>kubectl scale deployment/web --replicas=0</code>, then <code>--replicas=5</code>. Then look at <code>kubectl get replicaset</code>. The ReplicaSet's <code>DESIRED</code> column follows whatever you set. Then answer this: who scaled the ReplicaSet, you or the Deployment controller? (Hint: <code>kubectl describe deployment web</code>.)</div>
+
+<h2>Practice questions</h2>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A cluster has one control plane node and two worker nodes. <code>kubectl apply -f deployment.yaml</code> is run for a canteen-menu Deployment with <code>replicas: 4</code>.</p>
+<ol class="asks">
+<li><span class="am">[1]</span>Analyze what <code>kubectl</code>, the API server and etcd do with this request.</li>
+<li><span class="am">[1]</span>Analyze how the controller manager and the scheduler turn it into four placed Pods.</li>
+<li><span class="am">[1]</span>Analyze how the kubelet and the container runtime get the Pods Running.</li>
+<li><span class="am">[2]</span>Analyze what the cluster does when one worker node loses power.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<ul>
+<li><b>kubectl → API server → etcd:</b> kubectl reads the YAML and sends it over HTTPS to the API server, using the credentials in kubeconfig. The API server checks who you are and whether you're allowed (authentication, RBAC), validates the object, and saves the Deployment in etcd, the cluster's database. Every other component talks only to the API server.</li>
+<li><b>Controllers and scheduler:</b> in the controller manager, the Deployment controller sees the new Deployment and creates a ReplicaSet; the ReplicaSet controller sees it wants 4 Pods and has 0, and creates 4 Pod objects with no node yet. The scheduler sees unscheduled Pods, filters out nodes that can't take them (the control plane node is tainted; nodes without enough CPU or memory for the requests), scores the rest, and binds each Pod to a worker, for example 2 and 2.</li>
+<li><b>kubelet and container runtime:</b> the kubelet on each worker watches for Pods bound to its node. It asks the container runtime (containerd, through the CRI) to pull the image and start the containers, sets up the Pod's network, then reports the status back to the API server, which stores it in etcd. <code>kubectl get pods</code> now shows 4 Running.</li>
+<li><b>A worker loses power:</b> its kubelet stops sending heartbeats. After about 40–50 seconds the node controller marks the node <code>NotReady</code>, and its 2 Pods are removed from Service endpoints, so traffic goes only to the 2 Pods on the healthy worker. After the eviction timeout (5 minutes by default) those Pods are deleted. The ReplicaSet controller then sees 2 of 4 and creates 2 new Pods, which the scheduler places on the remaining worker if it has room (otherwise they stay <code>Pending</code> until capacity is added). The control plane node isn't used, because of its taint.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> sequence 3 (kubectl, API server and etcd 1; controllers and scheduler 1; kubelet and container runtime 1); node failure analysis 2.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A Deployment runs four replicas of a hostel-complaints API.</p>
+<ol class="asks">
+<li><span class="am">[2]</span>With a diagram, analyze the relationship between a Deployment, a ReplicaSet and a Pod.</li>
+<li><span class="am">[2]</span>Examine what the cluster does when two of its Pods are deleted at once with <code>kubectl delete pod</code>.</li>
+<li><span class="am">[1]</span>Analyze why teams do not create bare Pods for production workloads.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<pre><code>Deployment  complaints-api   (desired image, replicas: 4, update strategy)
+    │ owns
+    ▼
+ReplicaSet  complaints-api-7d9f8c   (one per version of the Pod template)
+    │ owns              selector: app=complaints-api
+    ▼
+Pod  Pod  Pod  Pod      (each runs the containers; label app=complaints-api)</code></pre>
+<ul>
+<li><b>Relationship:</b> you create the Deployment. It creates and manages a ReplicaSet for each version of the Pod template, which is how rolling updates and rollbacks work. The ReplicaSet's only job is to keep exactly N Pods matching its label selector. Pods run the containers. Each layer is the owner of the one below, so deleting the Deployment deletes the rest.</li>
+<li><b>Deleting two Pods:</b> the API server deletes them; the ReplicaSet controller, which watches its Pods, sees 2 running against 4 desired and immediately creates 2 new Pods with new names (and usually new IPs). The scheduler places them, the kubelets start them, and once they're Ready they're added to the Service's endpoints. The other 2 Pods keep serving throughout. This is the desired-state control loop: the cluster keeps working to make what's actual match what you declared.</li>
+<li><b>Why no bare Pods:</b> a Pod you create directly has no owner. If it's deleted, or its node fails, nothing recreates it. You also can't scale it to more replicas or do a rolling update or rollback. A Deployment gives all of that.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> relationship with diagram 2; analysis of the delete 2; why not bare Pods 1.</p>
+</details></div>
+
+<div class="practice-q recall">
+<p class="meta">5 marks · 9 minutes</p>
+<p>A college fest website runs as three replicas on a cluster with one control plane node.</p>
+<ol class="asks">
+<li><span class="am">[2]</span>With a neat diagram, explain the components of the Kubernetes control plane and of a worker node.</li>
+<li><span class="am">[1]</span>Explain the desired-state reconciliation loop.</li>
+<li><span class="am">[1]</span>Analyze what happens to the website when the only control plane node goes down.</li>
+<li><span class="am">[1]</span>Contrast this with a worker node going down.</li>
+</ol>
+<textarea placeholder="Write your answer…"></textarea>
+<details><summary>Model answer and marking</summary>
+<pre><code>CONTROL PLANE NODE                         WORKER NODE (×2)
+┌────────────────────────────┐            ┌──────────────────────────┐
+│ kube-apiserver  ◄──────────┼── kubectl  │ kubelet ──► container    │
+│   │                        │            │             runtime      │
+│ etcd (cluster state)       │◄──────────►│ kube-proxy  (containerd) │
+│ kube-scheduler             │            │ Pods: [web] [web]        │
+│ kube-controller-manager    │            └──────────────────────────┘
+└────────────────────────────┘</code></pre>
+<ul>
+<li><b>Control plane:</b> the <em>API server</em> is the front door; every component and user talks to it. <em>etcd</em> is the key-value database holding all cluster state. The <em>scheduler</em> picks a node for each new Pod. The <em>controller manager</em> runs the control loops (Deployment, ReplicaSet, node controllers and so on).</li>
+<li><b>Worker node:</b> the <em>kubelet</em> starts and watches the Pods assigned to its node and reports their status; the <em>container runtime</em> (containerd) pulls images and runs containers; <em>kube-proxy</em> sets up the network rules that send Service traffic to Pods.</li>
+<li><b>Reconciliation loop:</b> you declare the desired state (3 replicas of image v2). Each controller repeatedly compares the desired state with the actual state and acts to close the gap: a Pod is missing, so create one; there's one too many, so delete one. It never stops, which is why the cluster heals itself.</li>
+<li><b>Control plane down:</b> the website keeps working. The Pods are already running on the workers, the kubelets keep them running (and restart crashed containers locally), and kube-proxy's rules keep routing traffic. But nothing can change: kubectl doesn't work, no new Pods are scheduled, deleted Pods aren't replaced, nothing scales or updates. That's why production clusters run three control plane nodes (managed services like EKS do this for you).</li>
+<li><b>Worker down, by contrast:</b> the Pods on that node stop, but the control plane notices (node <code>NotReady</code>), removes them from the Service, and after the eviction timeout recreates them on the other worker. The website loses some capacity for a while but heals itself, which can't happen while the control plane is down.</li>
+</ul>
+<p class="marking"><b>Marking (5):</b> diagram with control plane and worker components 2; reconciliation loop 1; control plane failure 1; contrast with worker failure 1.</p>
+</details></div>
 
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>
