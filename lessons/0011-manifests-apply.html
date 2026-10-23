@@ -1,15 +1,15 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Manifests and kubectl apply</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
-<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 11</div>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 11 · <a href="../slides/0009-kubernetes-pods-deployments-services.html">Slides</a></div>
 <h1>Manifests &amp; kubectl apply</h1>
 
 <h2>Why this matters for DevOps</h2>
 <p>In lessons 9 and 10 you typed commands like <code>kubectl create deployment</code>, <code>kubectl scale</code> and <code>kubectl expose</code>. That works on your laptop. Now imagine a real team: five people, three clusters (dev, staging, production), and an incident at 2 a.m. Someone asks, “how many replicas should the backend have, and who changed it last week?” If the answer only lives in someone's shell history, nobody knows.</p>
-<p>Real teams write the <em>desired state</em> of every app into files, keep the files in Git, and let a command (or a CI pipeline) make the cluster match the files. Git then tells you what is running, who changed it, and why, and you can undo a change with <code>git revert</code>. This idea is called <b>declarative configuration</b>, and it's the base of everything in the rest of this course: Terraform in module 3, and GitOps tools like Argo CD at work. <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/object-management/">[Kubernetes docs: Object management]</a></p>
+<p>Real teams write the <em>intended state</em> of their apps into files, keep the files in Git, and let a command (or a CI pipeline) apply those files to the cluster. Git records what should run, who changed it, and why; the cluster still tells you what is actually running. A reverted Git change must be applied again, or reconciled by a GitOps tool, before the cluster changes. This idea is called <b>declarative configuration</b>, and it's the base of everything in the rest of this course: Terraform in module 3, and GitOps tools like Argo CD at work. <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/object-management/">[Kubernetes docs: Object management]</a></p>
 
 <h2>Three ideas, no more</h2>
 <p><b>Imperative vs declarative</b>: an <em>imperative</em> command says <em>what to do</em>: “scale to 5”, “create this Service”. A <em>declarative</em> file says <em>what should exist</em>: “there is a Deployment called <code>who</code> with 5 replicas”. You hand the file to Kubernetes and it works out the steps. This is the same control loop you saw in lesson 9, where you deleted a Pod and the Deployment brought it back. Now you write the desired state yourself.</p>
-<p><b>A manifest</b>: a YAML file describing one or more Kubernetes objects. Every object has the same four top-level fields <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[Kubernetes docs: Objects]</a>:</p>
+<p><b>A manifest</b>: a YAML document describing one Kubernetes object. A YAML file can contain several documents separated by <code>---</code>. The Deployment and Service in this lesson use four familiar top-level fields <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[Kubernetes docs: Objects]</a>:</p>
 <table>
 <tr><th>Field</th><th>Meaning</th><th>Example</th></tr>
 <tr><td><code>apiVersion</code></td><td>Which API group and version the object belongs to</td><td><code>apps/v1</code> for Deployments, <code>v1</code> for Services</td></tr>
@@ -17,8 +17,8 @@
 <tr><td><code>metadata</code></td><td>Its name, namespace and labels</td><td><code>name: who</code></td></tr>
 <tr><td><code>spec</code></td><td>The desired state: what you want</td><td><code>replicas: 3</code></td></tr>
 </table>
-<p>When you read an object back from the cluster, there is a fifth field, <code>status</code>: what Kubernetes actually has right now. You write <code>spec</code>. Kubernetes writes <code>status</code>, and the controllers keep pushing status towards spec.</p>
-<p><b>kubectl apply</b>: “make the cluster match this file”. If the object doesn't exist, apply creates it. If it exists, apply compares the file with the live object and changes only the fields that differ. If nothing differs, it does nothing. Running it twice is safe, which is what you want in a CI pipeline that runs on every commit. <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">[Kubernetes docs: Declarative management with config files]</a></p>
+<p>When you read a Deployment or Service back from the cluster, you also see <code>status</code>: what Kubernetes observes right now. You write <code>spec</code>. Controllers move the actual state towards the spec and report what they observe in status. Not every object uses <code>spec</code> and <code>status</code>: next lesson's ConfigMaps and Secrets store values under fields such as <code>data</code>.</p>
+<p><b>kubectl apply</b>: create the object if it is missing; otherwise calculate a patch from the manifest, the live object and the configuration applied previously. Values declared in the manifest are set on the live object, and fields previously applied but now removed from the manifest are cleared. Unrelated fields added by another writer can remain. Running the same apply again normally changes nothing, which is what you want in a CI pipeline that runs on every commit. Removing a whole object from a multi-document file does not delete the live object automatically; deletion is a separate operation. <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">[Kubernetes docs: Declarative management with config files]</a></p>
 <p class="aside">Think of ordering lunch for your team. The imperative way: you ring the canteen every time someone joins or leaves: “add one thali”, “cancel one dosa”. Miss a call and nobody knows the real order. The declarative way: a shared sheet lists the order, and the canteen makes whatever the sheet says. To change the order, you edit the sheet. The sheet is your manifest, and the canteen is the control plane.</p>
 
 <h2>Before you start</h2>
@@ -34,7 +34,7 @@ cd ~/k8s-practice</code></pre>
 <ol class="steps">
 <li>You don't have to write YAML from memory. Ask kubectl to print a manifest instead of creating anything. <code>--dry-run=client</code> means “don't send it to the cluster”, and <code>-o yaml</code> prints the object:
 <pre><code>kubectl create deployment who --image=traefik/whoami --replicas=3 --dry-run=client -o yaml</code></pre>
-Find <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>. Notice <code>app: who</code> appears <em>three</em> times: as the Deployment's own label, in the <code>selector</code>, and on the Pod <code>template</code>. Keep that in mind for step 7. The empty <code>strategy: {}</code>, <code>resources: {}</code> and <code>status: {}</code> lines are noise you can leave out.</li>
+Find <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>. Notice <code>app: who</code> appears <em>three</em> times, but the three occurrences do not have the same job. You will trace them in step 3. The empty <code>strategy: {}</code>, <code>resources: {}</code> and <code>status: {}</code> lines are defaults or output fields you can leave out of this manifest.</li>
 <li>To see what a field means, ask the cluster itself. <code>kubectl explain</code> reads the API's own documentation, so it always matches your Kubernetes version:
 <pre><code>kubectl explain deployment.spec.replicas
 kubectl explain deployment.spec.template.spec.containers.ports</code></pre></li>
@@ -60,7 +60,16 @@ spec:
           image: traefik/whoami:v1.11
           ports:
             - containerPort: 80</code></pre>
-Two small upgrades over the generated YAML: the image has a fixed tag, <code>v1.11</code>, not the moving <code>latest</code> (remember lesson 2), and <code>containerPort</code> documents which port the app listens on.</li>
+Read it from the outside in:
+<ul>
+<li><code>apiVersion: apps/v1</code> and <code>kind: Deployment</code> choose the Deployment API.</li>
+<li><code>metadata.name: who</code> names the Deployment. <code>metadata.labels</code> labels the Deployment object itself, for example so you can find it with <code>kubectl get deployments -l app=who</code>. This label does not select Pods and could be omitted without changing which Pods the Deployment manages.</li>
+<li><code>spec.replicas: 3</code> asks the Deployment to keep three Pods running.</li>
+<li><code>spec.selector.matchLabels</code> tells the Deployment which Pods belong to it. It <em>must</em> match <code>spec.template.metadata.labels</code>, because the template supplies the labels on every Pod the Deployment creates. Kubernetes rejects a Deployment when these two do not match.</li>
+<li><code>spec.template</code> is the blueprint for each Pod. Inside it, <code>containers</code> is a list because a Pod can run more than one container. This Pod runs one container named <code>whoami</code> from the <code>traefik/whoami:v1.11</code> image.</li>
+<li><code>containerPort: 80</code> documents that the process is expected to listen on port 80. It does not open the port or make the application listen; the process inside the image must actually do that.</li>
+</ul>
+The image has an explicit version tag, <code>v1.11</code>, instead of relying on the moving <code>latest</code> tag (remember lesson 2).</li>
 <li>Apply this one file. <code>-f</code> names the file to apply:
 <pre><code>kubectl apply -f who.yaml
 kubectl rollout status deployment/who
@@ -68,8 +77,8 @@ kubectl get deployment who</code></pre>
 You see <code>deployment.apps/who created</code>, and after a few seconds <code>3/3</code> Pods ready. Same result as <code>kubectl create deployment</code> in lesson 9, but now the desired state is written down in a file.<br>
 <b>Predict first:</b> what will kubectl print if you run the exact same apply again? Write your guess down, then run it:
 <pre><code>kubectl apply -f who.yaml</code></pre>
-It says <code>deployment.apps/who unchanged</code>. Apply compared the file with the cluster, found nothing different, and did nothing. Running it a hundred times gives the same result. That property is called <em>idempotent</em>, and it's why a CI pipeline can safely run <code>kubectl apply</code> on every push. (Try <code>kubectl create deployment who --image=traefik/whoami</code> now: it fails with <code>already exists</code>.)</li>
-<li>Change the app by editing the file, not the cluster. In <code>who.yaml</code>, change <code>replicas: 3</code> to <code>replicas: 5</code> and save. Before applying, preview what will change:
+It says <code>deployment.apps/who unchanged</code>. None of the fields managed by this manifest needed changing. Repeating the same operation produces the same result; that property is called <em>idempotent</em>, and it's why a CI pipeline can safely run <code>kubectl apply</code> on every push. (Try <code>kubectl create deployment who --image=traefik/whoami</code> now: it fails with <code>already exists</code>.)</li>
+<li>Now change the declared replica count. In <code>who.yaml</code>, change <code>replicas: 3</code> to <code>replicas: 5</code> and save. Editing the file records the new intended state; it does not change the running Deployment. Before applying it, preview what Kubernetes would change:
 <pre><code>kubectl diff -f who.yaml</code></pre>
 The output is a normal diff: <code>-  replicas: 3</code> and <code>+  replicas: 5</code>, plus a <code>generation</code> number that goes up by one each time the spec changes. Nothing has changed in the cluster yet. Now apply:
 <pre><code>kubectl apply -f who.yaml
@@ -82,12 +91,12 @@ The cluster now says 1, but your file says 5. This mismatch is called <em>drift<
 <pre><code>kubectl diff -f who.yaml
 kubectl apply -f who.yaml
 kubectl get deployment who</code></pre>
-The diff shows <code>replicas: 1</code> going to <code>replicas: 5</code>, and apply puts it back. The file in Git is the source of truth, so a hand fix that isn't also written into the file will be undone by the next deploy. The rule at work: change the file, not the cluster.</li>
+The diff shows <code>replicas: 1</code> going to <code>replicas: 5</code>, and apply restores 5 because the manifest still says <code>replicas: 5</code>. The earlier <code>kubectl scale</code> command changed only the live Deployment. If the Deployment should stay at 1 replica, change the manifest to <code>replicas: 1</code> and apply it.</li>
 <li>Break it on purpose. Kubernetes checks your manifest before accepting it. Copy the file, and in the copy change only the <em>Pod template's</em> label (the one under <code>template:</code>, the third <code>app: who</code>) to <code>app: whoo</code>:
 <pre><code>cp who.yaml bad.yaml
 # edit bad.yaml: under template → metadata → labels, set  app: whoo
 kubectl apply -f bad.yaml</code></pre>
-You get: <code>`selector` does not match template `labels`</code>. The Deployment's selector looks for <code>app=who</code>, but its own Pods would carry <code>app=whoo</code>, so it could never find them. Kubernetes refuses the whole Deployment. Now try a typo in a field name. In <code>bad.yaml</code>, fix the label back to <code>who</code>, then change <code>replicas:</code> to <code>replicass:</code>, and apply again. The error is long, but look for <code>unknown field "spec.replicass"</code>. Both checks happen on the API server <em>before</em> anything changes, so a broken file never half-applies. Delete the copy: <code>rm bad.yaml</code>.</li>
+You get: <code>`selector` does not match template `labels`</code>. The Deployment's selector looks for <code>app=who</code>, but its own Pods would carry <code>app=whoo</code>, so it could never find them. Kubernetes rejects that Deployment update without partly changing the Deployment. Now try a typo in a field name. In <code>bad.yaml</code>, fix the label back to <code>who</code>, then change <code>replicas:</code> to <code>replicass:</code>, and apply again. The error is long, but look for <code>unknown field "spec.replicass"</code>. Delete the copy: <code>rm bad.yaml</code>.</li>
 <li>Your Deployment has no Service yet, so nothing can reach it by name. Add the Service from lesson 10 to the <em>same</em> file. At the end of <code>who.yaml</code>, add a line with just <code>---</code>, then the Service. The <code>---</code> line separates two objects in one file:
 <pre><code>---
 apiVersion: v1
@@ -103,16 +112,17 @@ spec:
 Read it field by field. It's the same object you printed with <code>kubectl get service who -o yaml</code> in lesson 10:
 <ul>
 <li><code>apiVersion: v1</code> and <code>kind: Service</code>: Services belong to the core API group, which is written as just <code>v1</code>.</li>
-<li><code>metadata.name: who</code>: the Service's name, which is also its DNS name. Other Pods call <code>http://who</code>.</li>
-<li><code>spec.selector: app: who</code>: send traffic to Pods carrying this label. It has to match the labels on the Pod <em>template</em> (under <code>template.metadata.labels</code>), because those are the labels the Pods actually get.</li>
-<li><code>port: 80</code>: the port the Service listens on. <code>targetPort: 80</code>: the port traffic is forwarded to inside the container. It must match the port the app really listens on, the <code>containerPort</code> in the Deployment. If the app listened on 3000, you would keep <code>port: 80</code> and set <code>targetPort: 3000</code>.</li>
-<li>There is no <code>type</code> line, so this is a <code>ClusterIP</code> Service, reachable only inside the cluster. To open it to your laptop, you would add <code>type: LoadBalancer</code> under <code>spec</code>. To fix the node port, you would add <code>nodePort: 30090</code> next to <code>port</code>, with <code>type: NodePort</code> or <code>LoadBalancer</code>.</li>
+<li><code>metadata.name: who</code>: the Service's name. A Pod in the same namespace can call <code>http://who</code>. A Pod in another namespace needs a qualified name such as <code>who.default</code> or <code>who.default.svc.cluster.local</code>.</li>
+<li><code>spec.selector: app: who</code>: send traffic to Pods carrying this label. This selector should match the Pod labels under <code>template.metadata.labels</code>, because those are the labels the Pods actually get. Unlike a mismatched Deployment selector, a Service selector that matches no Pods is still valid: the Service is created, but it has no endpoints and cannot deliver requests.</li>
+<li><code>port: 80</code>: the port clients use on the Service. <code>targetPort: 80</code>: the port on the selected Pods to which traffic is sent. The target must be where the application process really listens. The Deployment's <code>containerPort</code> documents that expectation but does not configure the process or control a numeric <code>targetPort</code>. If the app listened on 3000, you would keep <code>port: 80</code> and set <code>targetPort: 3000</code>.</li>
+<li>There is no <code>type</code> line, so this is a <code>ClusterIP</code> Service, reachable only inside the cluster. To open it to your laptop on this course setup, you would add <code>type: LoadBalancer</code> under <code>spec</code>. To choose a fixed node port, add <code>nodePort: 30090</code> next to <code>port</code> and use <code>type: NodePort</code> or <code>LoadBalancer</code>.</li>
 </ul>
+<p class="aside">Trace the connection: the Deployment selector must match the Pod-template labels so the Deployment can manage its Pods. The Service selector independently looks for those Pod labels so it can send traffic to them. Client traffic arrives at the Service's <code>port</code>, then goes to the application's real listening port through <code>targetPort</code>.</p>
 <b>Predict first:</b> the file now has two objects, and one of them already exists. What will apply print for each? Then run it:
 <pre><code>kubectl apply -f who.yaml
 kubectl get deployment,service who</code></pre>
-You see <code>deployment.apps/who unchanged</code> and <code>service/who created</code>. Apply handles each object on its own: it left the Deployment alone and created only the missing Service.</li>
-<li>Delete what the file created, using the same file:
+You see <code>deployment.apps/who unchanged</code> and <code>service/who created</code>. Apply handles each object on its own: it left the Deployment alone and created only the missing Service. This also means a multi-document apply is not one transaction. If one object is valid and a later object is invalid, the valid object may already have been changed.</li>
+<li>Delete the objects named in the file, using the same file:
 <pre><code>kubectl delete -f who.yaml
 kubectl get all</code></pre>
 Both the Deployment and the Service are gone, and only the built-in <code>kubernetes</code> Service remains. Compare with lesson 10, where you had to remember to delete the Service separately. The file remembers for you. Keep <code>who.yaml</code>: you will build on it in the next lessons.</li>
@@ -133,71 +143,61 @@ Both the Deployment and the Service are gone, and only the built-in <code>kubern
 <textarea placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
-<li><b>Imperative vs declarative:</b> imperative commands say <em>what to do</em>, step by step: <code>kubectl create deployment</code>, <code>kubectl scale</code>, <code>kubectl set image</code>. They're quick, but they leave no file behind, can fail if run twice (“already exists”), and the result depends on the order they were typed in. Declarative manifests say <em>what should exist</em>: <code>kubectl apply -f</code> compares the file with the cluster and changes only the difference, creating what's missing and updating what's different. Running it again with no changes does nothing.</li>
-<li><b>Why Git:</b> the manifests become the single record of what should run. Every change goes through a pull request and review, history shows who changed what and why, a bad change is undone with <code>git revert</code>, and the whole app can be rebuilt on a new cluster from the repo (and GitOps tools like Argo CD can apply it automatically).</li>
+<li><b>Imperative vs declarative:</b> imperative commands say <em>what to do</em>, step by step: <code>kubectl create deployment</code>, <code>kubectl scale</code>, <code>kubectl set image</code>. They're quick, but they leave no file behind, can fail if run twice (“already exists”), and the result depends on the order they were typed in. Declarative manifests say <em>what should exist</em>: <code>kubectl apply -f</code> creates missing objects and patches existing objects so the fields managed by the manifest have the declared values. Running it again with no changes normally does nothing.</li>
+<li><b>Why Git:</b> the manifests record what the team intends to run. Pull requests can review each change, history shows who changed what and why, and <code>git revert</code> can restore an earlier configuration. The reverted configuration must then be applied, either by a person, CI or a GitOps tool such as Argo CD. Kubernetes objects stored in the repo can also be recreated on a new cluster.</li>
 <li><b>What a diff shows:</b> <code>kubectl diff -f</code> sends the manifest to the API server as a dry run and prints, line by line, how the live objects would change: for example <code>- replicas: 10</code> / <code>+ replicas: 4</code>, or a new image tag. Nothing is changed. It's the preview a reviewer checks before applying.</li>
-<li><b>The manual scale, then apply:</b> the live Deployment has 10 replicas, but Git still says 4, so the cluster has drifted from the code. When the manifest is applied, <code>replicas</code> is a field the manifest sets, so apply sets it back to 4 and 6 Pods are removed, possibly while traffic is still high. The scale-up was never recorded, so it's silently undone. (Fields the manifest doesn't mention, like an extra annotation added by hand, are left alone.) The fix: make the change in Git, or let an HorizontalPodAutoscaler own the replica count and remove <code>replicas</code> from the manifest so apply doesn't fight it.</li>
+<li><b>The manual scale, then apply:</b> the live Deployment has 10 replicas, but Git still says 4, so the cluster has drifted from the intended configuration. When the manifest is applied, <code>replicas</code> is a field the manifest manages, so apply sets it back to 4 and 6 Pods are removed, possibly while traffic is still high. The scale-up was never recorded, so it is silently undone. (A field the manifest has never managed, such as a new annotation added by hand, can remain.) The fix: make the change in Git, or let a HorizontalPodAutoscaler own the replica count and remove <code>replicas</code> from the manifest so apply does not fight it.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> imperative versus declarative 1; why Git 1; what a diff shows 1; manual edit analysis 2.</p>
 </details></div>
 
 <div class="practice-q recall">
 <p class="meta">5 marks · 9 minutes</p>
-<p>In a food-delivery app:</p>
-<ul class="needs">
-<li>users reach the React frontend from outside the cluster on node port 30090</li>
-<li>the orders API is called only by the frontend's Nginx proxy, inside the cluster</li>
-<li>Redis is used only by the orders API</li>
-</ul>
-<pre><code>apiVersion: v1
-kind: Service
+<p>An orders API listens on port 8080. A teammate writes these two manifests:</p>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: frontend
+  name: orders
+  labels:
+    app: orders-control
 spec:
-  type: ClusterIP
   selector:
-    app: frontend
-  ports:
-    - port: 80
-      targetPort: 80
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders-v2
+    spec:
+      containers:
+        - name: api
+          image: example/orders:v2
+          ports:
+            - containerPort: 8080
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: orders-api
+  name: orders
 spec:
-  type: NodePort
   selector:
-    app: orders-api
+    app: order
   ports:
     - port: 80
-      targetPort: 3000
-      nodePort: 30300
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-spec:
-  type: LoadBalancer
-  selector:
-    app: redis
-  ports:
-    - port: 6379
-      targetPort: 6379</code></pre>
+      targetPort: 3000</code></pre>
 <ol class="asks">
-<li><span class="am">[3]</span>Detect the three problems with how these Services expose the components, and state the fix for each.</li>
-<li><span class="am">[2]</span>Analyze the risk or failure each problem causes.</li>
+<li><span class="am">[2]</span>Analyze what happens when Kubernetes tries to apply the Deployment, and fix the relevant labels.</li>
+<li><span class="am">[2]</span>Assume the Deployment is fixed. Analyze what happens when the Service is applied, and fix its selector.</li>
+<li><span class="am">[1]</span>Fix the Service port mapping. Does changing <code>containerPort</code> make the application listen on that port?</li>
 </ol>
 <textarea placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
-<li><b><code>frontend</code> is ClusterIP:</b> it has only an internal cluster address, so users outside can't open the app at all. Fix: <code>type: NodePort</code> with <code>nodePort: 30090</code>.</li>
-<li><b><code>orders-api</code> is NodePort 30300:</b> the API is reachable on port 30300 of every node, so anyone who can reach a node can call it directly, skipping the frontend proxy and whatever checks it does, and the attack surface grows. Fix: <code>type: ClusterIP</code> and remove <code>nodePort</code>; the proxy reaches it at <code>orders-api</code> inside the cluster.</li>
-<li><b><code>redis</code> is LoadBalancer:</b> on a cloud this creates a paid load balancer with a public address in front of Redis, which often has no password: anyone on the internet could read or wipe the cache, or plant data. Fix: <code>type: ClusterIP</code>.</li>
-<li><b>Principle:</b> expose each component only as far as its callers need. Only the entry point is reachable from outside; everything else stays internal.</li>
+<li><b>Deployment:</b> Kubernetes rejects it because <code>spec.selector.matchLabels</code> says <code>app: orders</code>, while <code>spec.template.metadata.labels</code> says <code>app: orders-v2</code>. Make the Pod-template label <code>app: orders</code>. The Deployment's own <code>metadata.labels.app: orders-control</code> is not the cause: it labels the Deployment object and does not have to match the Pod selector.</li>
+<li><b>Service selector:</b> the Service itself is valid and is created, but <code>app: order</code> matches none of the fixed Deployment's Pods, so the Service has no endpoints. Change it to <code>app: orders</code>. Kubernetes does not reject a Service merely because its selector currently matches no Pods.</li>
+<li><b>Port mapping:</b> clients use Service port 80, but traffic must go to the API's actual listening port, so set <code>targetPort: 8080</code>. <code>containerPort: 8080</code> documents the expected port; changing that field alone does not reconfigure the application process.</li>
 </ul>
-<p class="marking"><b>Marking (5):</b> three problems, each with its fix 3 (1 each); risk or failure analysed for each 2. A correct description of each fix earns the mark.</p>
+<p class="marking"><b>Marking (5):</b> Deployment rejection, label roles and fix 2; valid Service with no endpoints and selector fix 2; correct target port and <code>containerPort</code> explanation 1.</p>
 </details></div>
 
 <h2>Check yourself</h2>
@@ -210,14 +210,14 @@ spec:
 <button>The Pods are recreated with new names</button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="2" data-explain="You write spec, the desired state. Kubernetes writes status, what it actually has, and the controllers keep moving status towards spec.">
-<p class="q">2. In a manifest, which field holds the state you <em>want</em>?</p>
+<div class="quiz" data-answer="2" data-explain="In a Deployment, you write spec, the desired state. Controllers move the actual state towards spec and report what they observe in status. Some other object kinds use different fields.">
+<p class="q">2. In a Deployment manifest, which field holds the state you <em>want</em>?</p>
 <button><code>metadata</code></button>
 <button><code>status</code></button>
 <button><code>spec</code></button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="0" data-explain="The file says 4, so the next apply sets replicas back to 4. A hand change that isn't also in the file gets undone. Change the file, not the cluster.">
+<div class="quiz" data-answer="0" data-explain="The scale command changed only the live Deployment. The manifest still declares 4 replicas, so the next apply restores 4. If the Deployment should stay at 10 replicas, change the manifest to 10 and apply it.">
 <p class="q">3. Your Git repo's manifest says <code>replicas: 4</code>. During an incident, a teammate runs <code>kubectl scale --replicas=10</code>. The next day CI runs <code>kubectl apply</code> with the same file. How many replicas are there after that?</p>
 <button>4</button>
 <button>10</button>
@@ -235,7 +235,7 @@ spec:
 <p class="q">5. Interview practice (say it out loud or type it): “What's the difference between <code>kubectl create</code> and <code>kubectl apply</code>? Why do teams keep manifests in Git?”</p>
 <textarea placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
-<p><code>kubectl create</code> is imperative: it creates an object, and fails if the object already exists. <code>kubectl apply</code> is declarative: you give it a manifest describing the desired state, and it creates the object if it's missing, or changes only the fields that differ if it exists. If nothing differs, it does nothing, so it's safe to run again and again, which makes it a good fit for CI. A manifest has <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>; Kubernetes adds <code>status</code>, and the controllers keep the actual state moving towards the spec. Teams keep manifests in Git so the files are the single source of truth: every change is reviewed in a pull request, often with the output of <code>kubectl diff</code>, every change has an author and a reason, and a bad change can be undone with <code>git revert</code>. Changes made by hand with commands like <code>kubectl scale</code> are drift, and the next apply undoes them, so the rule is to change the file, not the cluster. Tools like Helm and Argo CD build on this same idea.</p></details>
+<p><code>kubectl create deployment</code> is imperative: it creates an object and fails if that object already exists. <code>kubectl apply</code> is declarative: you give it a manifest, and it creates the object if it is missing or patches an existing object so the fields managed by the manifest have the declared values. Reapplying the same configuration normally changes nothing, which makes it a good fit for CI. Deployments and Services have <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>; Kubernetes reports their observed state under <code>status</code>. Teams keep manifests in Git so intended configuration can be reviewed and its history recorded. A revert must be applied before it changes the cluster. If a manifest manages <code>spec.replicas</code>, a manual <code>kubectl scale</code> creates drift and the next apply restores the value from the manifest. Tools such as Helm and Argo CD build on the same declarative idea.</p></details>
 </div>
 
 <h2>Read next</h2>
@@ -244,5 +244,5 @@ spec:
 
 <div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how does apply know which fields I removed from the file?”, “what is server-side apply?”, or paste any YAML error you see. When you're done, tell Claude how the quiz went so lesson 12 (ConfigMaps and Secrets) is pitched right.</div>
 
-<nav class="course"><a href="0010-services.html">← Lesson 10: Services</a><span>Next: Lesson 12, Config &amp; secrets (coming)</span></nav>
+<nav class="course"><a href="0010-services.html">← Lesson 10: Services</a><a href="0012-config-health-checks.html">Lesson 12: Config &amp; health checks →</a></nav>
 </main><script src="../assets/quiz.js"></script></body></html>

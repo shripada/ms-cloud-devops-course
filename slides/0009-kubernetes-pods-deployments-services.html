@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pods, Deployments &amp; Services</title>
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="deck.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body>
+
+<!-- Arrowheads shared by every diagram -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="reveal"><div class="slides">
+
+<!-- ============ Title ============ -->
+<section class="title">
+  <div class="kicker">Module 2 · Lessons 9–11</div>
+  <h1>Pods, Deployments<br>&amp; Services</h1>
+  <p class="sub">How Kubernetes keeps your app running, gives it one address, and reads it from a YAML file</p>
+  <aside class="notes">
+    Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
+    Today: the cluster, Pods, Deployments (lesson 9), Services (lesson 10), manifests and kubectl apply (lesson 11).
+  </aside>
+</section>
+
+<section>
+  <h2>Why Docker Compose is not enough</h2>
+  <p>IRCTC, Tatkal booking, 10 a.m.:</p>
+  <ul>
+    <li class="fragment">50 copies of the booking service, spread across many servers</li>
+    <li class="fragment">A server dies → its copies must start again <em>somewhere else</em>, in seconds</li>
+    <li class="fragment">New code ships → old copies are replaced one by one, nobody sees an error page</li>
+  </ul>
+  <p class="fragment">Compose only does “start these containers on <em>this</em> machine”. Nothing watches them afterwards.</p>
+  <p class="take">Kubernetes is a container orchestrator: you say what you want running, it keeps it running.</p>
+  <aside class="notes">
+    Connect to module 1: Compose ran app + database on one laptop. Ask: what happens if that laptop dies? Nobody restarts anything.
+    K8s = K, 8 letters, s. EKS, AKS, GKE are Kubernetes sold as a service. It appears in almost every Cloud/DevOps job description.
+  </aside>
+</section>
+
+<!-- ============ 01 Cluster ============ -->
+<section class="divider">
+  <div class="num">01</div>
+  <h2>The cluster</h2>
+  <p>A group of machines managed together</p>
+</section>
+
+<section>
+  <h2>Inside a cluster</h2>
+  <svg class="d" viewBox="0 0 1170 470" role="img" aria-label="Cluster: you use kubectl to talk to the API server on the control plane; the control plane also has etcd, the scheduler and the controller manager; each worker node runs a kubelet and kube-proxy">
+    <rect class="frame" x="220" y="10" width="440" height="450" rx="14"/>
+    <text class="b" x="240" y="44">Control plane <tspan class="s" dx="8">the brain</tspan></text>
+    <rect class="cp" x="245" y="64" width="390" height="78" rx="10"/>
+    <text class="b" x="265" y="98">API server</text>
+    <text class="s" x="265" y="126">the front door</text>
+    <g class="fragment">
+      <rect class="cp" x="245" y="156" width="390" height="78" rx="10"/>
+      <text class="b" x="265" y="190">etcd</text>
+      <text class="s" x="265" y="218">database of the cluster's records</text>
+      <rect class="cp" x="245" y="248" width="390" height="78" rx="10"/>
+      <text class="b" x="265" y="282">scheduler</text>
+      <text class="s" x="265" y="310">picks a node for each new Pod</text>
+      <rect class="cp" x="245" y="340" width="390" height="100" rx="10"/>
+      <text class="b" x="265" y="374">controller manager</text>
+      <text class="s" x="265" y="402">runs the control loops</text>
+      <text class="s" x="265" y="426">(Deployment, ReplicaSet, node…)</text>
+    </g>
+    <g class="fragment">
+      <rect class="frame" x="730" y="10" width="430" height="215" rx="14"/>
+      <text class="b" x="750" y="44">Worker node 1</text>
+      <rect class="box" x="750" y="62" width="185" height="62" rx="8"/>
+      <text class="b" x="770" y="102">kubelet</text>
+      <rect class="box" x="955" y="62" width="185" height="62" rx="8"/>
+      <text class="b" x="975" y="102">kube-proxy</text>
+      <rect class="pod" x="750" y="144" width="120" height="56" rx="8"/>
+      <text x="780" y="180">Pod</text>
+      <rect class="pod" x="885" y="144" width="120" height="56" rx="8"/>
+      <text x="915" y="180">Pod</text>
+
+      <rect class="frame" x="730" y="245" width="430" height="215" rx="14"/>
+      <text class="b" x="750" y="279">Worker node 2</text>
+      <rect class="box" x="750" y="297" width="185" height="62" rx="8"/>
+      <text class="b" x="770" y="337">kubelet</text>
+      <rect class="box" x="955" y="297" width="185" height="62" rx="8"/>
+      <text class="b" x="975" y="337">kube-proxy</text>
+      <rect class="pod" x="750" y="379" width="120" height="56" rx="8"/>
+      <text x="780" y="415">Pod</text>
+    </g>
+    <g class="fragment">
+      <rect class="svc" x="10" y="64" width="160" height="78" rx="10"/>
+      <text class="b" x="30" y="98">you</text>
+      <text class="m" x="30" y="126">kubectl</text>
+      <path class="arrow acc" d="M172,103 L240,103"/>
+      <path class="arrow" d="M637,90 C690,90 700,93 746,93"/>
+      <path class="arrow" d="M637,118 C700,140 690,328 746,328"/>
+      <text class="s" x="10" y="200">You never log in</text>
+      <text class="s" x="10" y="226">to nodes. You only</text>
+      <text class="s" x="10" y="252">talk to the API</text>
+      <text class="s" x="10" y="278">server.</text>
+    </g>
+  </svg>
+  <p class="take">The kubelet on each node starts containers when the control plane tells it to.</p>
+  <aside class="notes">
+    Click 1: the other three control plane parts. etcd = records, scheduler = which node, controller manager = the loops (the AC thermostat from lesson 9).
+    Click 2: worker nodes. kubelet is the agent that starts containers. kube-proxy runs once on every node; we meet it again with Services.
+    Click 3: you and kubectl. Every command goes to the API server. The control plane parts themselves run as Pods in kube-system.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Say hello to the cluster</h2>
+<pre class="term"><span class="cmd">kubectl get nodes</span>
+<span class="out">NAME                    STATUS   ROLES</span>
+<span class="out">desktop-control-plane   <span class="ok">Ready</span>    control-plane</span>
+<span class="out">desktop-worker          <span class="ok">Ready</span>    &lt;none&gt;</span>
+<span class="out">desktop-worker2         <span class="ok">Ready</span>    &lt;none&gt;</span></pre>
+<pre class="term fragment"><span class="cmd">kubectl get pods -n kube-system -o wide</span>
+<span class="out">NAME                                            NODE</span>
+<span class="out"><span class="hi">etcd</span>-desktop-control-plane                        desktop-control-plane</span>
+<span class="out"><span class="hi">kube-apiserver</span>-desktop-control-plane              desktop-control-plane</span>
+<span class="out"><span class="hi">kube-scheduler</span>-desktop-control-plane              desktop-control-plane</span>
+<span class="out"><span class="hi">kube-proxy</span>-4xk2m                                  desktop-worker</span></pre>
+  <p class="take">The control plane parts run as Pods too, on the control plane node.</p>
+  <aside class="notes">
+    Output trimmed. On minikube the nodes are minikube, minikube-m02, minikube-m03.
+    -n picks a namespace, like a folder for cluster objects. kube-proxy appears once per node.
+  </aside>
+</section>
+
+<!-- ============ 02 Pod ============ -->
+<section class="divider">
+  <div class="num">02</div>
+  <h2>The Pod</h2>
+  <p>The smallest thing Kubernetes runs</p>
+</section>
+
+<section>
+  <h2>A Pod wraps a container</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="A Pod with one nginx container and its own IP is deleted; a new Pod with a new name and a new IP replaces it">
+    <g class="fragment semi-fade-out" data-fragment-index="0">
+      <rect class="pod" x="40" y="40" width="440" height="300" rx="16"/>
+      <text class="b" x="70" y="90">Pod</text>
+      <text class="m" x="70" y="124">web-6b7f9c4d8-x2k4q</text>
+      <rect class="box" x="70" y="150" width="380" height="90" rx="10"/>
+      <text class="b" x="95" y="190">container</text>
+      <text class="m" x="95" y="222">image: nginx</text>
+      <text class="m" x="70" y="300">IP 10.244.1.5</text>
+    </g>
+    <g class="fragment" data-fragment-index="0">
+      <path class="cross" d="M90,70 L430,310 M430,70 L90,310"/>
+      <text class="b badt" x="140" y="380">crashes or gets deleted</text>
+    </g>
+    <g class="fragment" data-fragment-index="1">
+      <path class="arrow acc" d="M500,190 L640,190"/>
+      <text class="s" x="505" y="170">replaced</text>
+      <rect class="pod" x="680" y="40" width="460" height="300" rx="16"/>
+      <text class="b" x="710" y="90">new Pod</text>
+      <text class="m acc" x="710" y="124">web-6b7f9c4d8-p8m2z</text>
+      <rect class="box" x="710" y="150" width="400" height="90" rx="10"/>
+      <text class="b" x="735" y="190">container</text>
+      <text class="m" x="735" y="222">image: nginx</text>
+      <text class="m acc" x="710" y="300">IP 10.244.2.7</text>
+      <text class="b acc" x="740" y="380">new name, new IP</text>
+    </g>
+  </svg>
+  <p class="take">Pods are disposable: a dead Pod is never repaired, a new one replaces it.</p>
+  <aside class="notes">
+    Kubernetes never runs a bare container; it always runs a Pod. Usually one container, sometimes a few that must stay together. All containers in a Pod share one IP.
+    Click 1: the Pod dies. Click 2: the replacement has a NEW name and a NEW IP. Remember the new IP; it is why we need Services later.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>A bare Pod has nobody watching it</h2>
+<pre class="term"><span class="cmd">kubectl run solo --image=nginx</span>
+<span class="out">pod/solo created</span>
+<span class="cmd">kubectl delete pod solo</span>
+<span class="out">pod "solo" deleted</span>
+<span class="cmd">kubectl get pods</span>
+<span class="bad">No resources found in default namespace.</span></pre>
+  <p class="fragment">Gone for good. Nobody had asked Kubernetes to <em>keep</em> it running.</p>
+  <p class="take">To keep Pods running, you need something that watches them: a Deployment.</p>
+  <aside class="notes">
+    This is the "wrong way" from lesson 9. Ask the room first: will it come back? Then show it doesn't.
+  </aside>
+</section>
+
+<!-- ============ 03 Deployment ============ -->
+<section class="divider">
+  <div class="num">03</div>
+  <h2>The Deployment</h2>
+  <p>Write down what you want; a controller keeps it true</p>
+</section>
+
+<section>
+  <h2>Desired state and the control loop</h2>
+  <svg class="d" viewBox="0 0 1170 380" role="img" aria-label="Control loop: compare desired state with actual state, fix the difference, repeat forever">
+    <rect class="svc" x="20" y="130" width="300" height="120" rx="12"/>
+    <text class="b" x="45" y="175">Desired state</text>
+    <text class="m" x="45" y="212">3 Pods of nginx</text>
+    <text class="s" x="45" y="238">you write this</text>
+    <g class="fragment">
+      <path class="arrow" d="M322,190 L420,190"/>
+      <rect class="cp" x="430" y="130" width="300" height="120" rx="12"/>
+      <text class="b" x="455" y="175">Compare</text>
+      <text class="s" x="455" y="210">with actual state:</text>
+      <text class="m" x="455" y="238">2 Pods running</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M732,190 L830,190"/>
+      <rect class="pod" x="840" y="130" width="310" height="120" rx="12"/>
+      <text class="b" x="865" y="175">Fix the difference</text>
+      <text class="m" x="865" y="212">create 1 Pod</text>
+      <text class="s" x="865" y="238">(or delete extras)</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow acc" d="M995,252 C995,350 580,350 580,256"/>
+      <text class="b acc" x="640" y="370">repeat forever</text>
+      <text class="s" x="45" y="60">Like an AC: you set 24 °C; the thermostat keeps checking</text>
+      <text class="s" x="45" y="88">the room and switches cooling on or off to match.</text>
+    </g>
+  </svg>
+  <p class="take">A Deployment holds the desired state; a controller keeps actual = desired.</p>
+  <aside class="notes">
+    The controller manager runs this loop. You never say "create a Pod now"; you say "there should be 3" and the loop does the rest.
+    Same idea comes back in lesson 11: the YAML file is the desired state.
+  </aside>
+</section>
+
+<section>
+  <h2>Deployment → ReplicaSet → Pods</h2>
+  <svg class="d" viewBox="0 0 1170 440" role="img" aria-label="The Deployment web owns ReplicaSet web-6b7f9c4d8, which owns three Pods labelled app=web; the ReplicaSet counts Pods by that label">
+    <rect class="svc" x="20" y="170" width="290" height="110" rx="12"/>
+    <text class="b" x="45" y="214">Deployment</text>
+    <text class="m" x="45" y="252">web</text>
+    <g class="fragment">
+      <path class="arrow" d="M312,225 L410,225"/>
+      <text class="s" x="330" y="210">owns</text>
+      <rect class="cp" x="420" y="150" width="340" height="150" rx="12"/>
+      <text class="b" x="445" y="194">ReplicaSet</text>
+      <text class="m" x="445" y="230">web-6b7f9c4d8</text>
+      <text class="s" x="445" y="266">only job: keep exactly</text>
+      <text class="s" x="445" y="290">N Pods running</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M762,200 L840,80"/>
+      <path class="arrow" d="M762,225 L840,225"/>
+      <path class="arrow" d="M762,250 L840,370"/>
+      <text class="s" x="772" y="212">owns</text>
+      <rect class="pod" x="850" y="40" width="300" height="80" rx="10"/>
+      <text class="m" x="870" y="88">web-6b7f9c4d8-x2k4q</text>
+      <rect class="pod" x="850" y="185" width="300" height="80" rx="10"/>
+      <text class="m" x="870" y="233">web-6b7f9c4d8-7hq9d</text>
+      <rect class="pod" x="850" y="330" width="300" height="80" rx="10"/>
+      <text class="m" x="870" y="378">web-6b7f9c4d8-m3vtw</text>
+    </g>
+    <g class="fragment">
+      <rect class="tag" x="1040" y="20" width="120" height="36" rx="18"/>
+      <text class="m acc" x="1053" y="45">app=web</text>
+      <rect class="tag" x="1040" y="165" width="120" height="36" rx="18"/>
+      <text class="m acc" x="1053" y="190">app=web</text>
+      <rect class="tag" x="1040" y="310" width="120" height="36" rx="18"/>
+      <text class="m acc" x="1053" y="335">app=web</text>
+      <text class="m acc" x="445" y="345">selector: app=web</text>
+      <text class="s" x="445" y="375">counts Pods by label,</text>
+      <text class="s" x="445" y="401">not by name</text>
+    </g>
+  </svg>
+  <p class="take">Each layer owns the one below: delete the Deployment and the rest goes too.</p>
+  <aside class="notes">
+    Look at the names: ReplicaSet = web-&lt;hash&gt;, Pod = web-&lt;hash&gt;-&lt;random&gt;.
+    Last click: the label app=web. The ReplicaSet finds "its" Pods by label. Labels come back with Services.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>See the chain of three objects</h2>
+<pre class="term"><span class="cmd">kubectl create deployment web --image=nginx --replicas=3</span>
+<span class="cmd">kubectl get deployment,replicaset,pods</span>
+<span class="out">NAME                            READY   UP-TO-DATE   AVAILABLE</span>
+<span class="out"><span class="hi">deployment.apps/web</span>             3/3     3            3</span>
+
+<span class="out">NAME                            DESIRED   CURRENT   READY</span>
+<span class="out"><span class="hi">replicaset.apps/web-6b7f9c4d8</span>   3         3         3</span>
+
+<span class="out">NAME                            READY   STATUS</span>
+<span class="out"><span class="hi">pod/web-6b7f9c4d8-x2k4q</span>         1/1     Running</span>
+<span class="out"><span class="hi">pod/web-6b7f9c4d8-7hq9d</span>         1/1     Running</span>
+<span class="out"><span class="hi">pod/web-6b7f9c4d8-m3vtw</span>         1/1     Running</span></pre>
+  <p class="take">Add <code>-o wide</code> to see each Pod's IP and the node the scheduler picked.</p>
+  <aside class="notes">
+    In lesson 9 students created it with 1 replica and scaled to 3 with kubectl scale; same result.
+    Debug habits from module 1 still work: kubectl logs, kubectl exec, kubectl describe (look at Events at the bottom).
+  </aside>
+</section>
+
+<section>
+  <h2>Self-healing: delete a Pod</h2>
+  <svg class="d" viewBox="0 0 1170 430" role="img" aria-label="ReplicaSet wants 3 Pods; one Pod is deleted, the ReplicaSet sees 2 and creates a new Pod with a new name">
+    <rect class="cp" x="330" y="10" width="510" height="120" rx="12"/>
+    <text class="b" x="355" y="52">ReplicaSet web-6b7f9c4d8</text>
+    <text class="s" x="355" y="84">wants 3 Pods with app=web</text>
+    <g class="fragment fade-out" data-fragment-index="0">
+      <text class="b okt" x="355" y="116">has 3 ✓</text>
+    </g>
+    <g class="fragment current-visible" data-fragment-index="0">
+      <text class="b badt" x="355" y="116">has 2 → create 1</text>
+    </g>
+    <g class="fragment" data-fragment-index="1">
+      <text class="b okt" x="355" y="116">has 3 ✓</text>
+    </g>
+
+    <rect class="pod" x="40" y="240" width="320" height="110" rx="12"/>
+    <text class="b" x="65" y="284">Pod</text>
+    <text class="m" x="65" y="320">…-x2k4q</text>
+    <g class="fragment semi-fade-out" data-fragment-index="0">
+      <rect class="pod" x="425" y="240" width="320" height="110" rx="12"/>
+      <text class="b" x="450" y="284">Pod</text>
+      <text class="m" x="450" y="320">…-7hq9d</text>
+    </g>
+    <g class="fragment" data-fragment-index="0">
+      <path class="cross" d="M455,250 L715,340 M715,250 L455,340"/>
+      <text class="m badt" x="455" y="390">kubectl delete pod …-7hq9d</text>
+    </g>
+    <rect class="pod" x="810" y="240" width="320" height="110" rx="12"/>
+    <text class="b" x="835" y="284">Pod</text>
+    <text class="m" x="835" y="320">…-m3vtw</text>
+    <g class="fragment" data-fragment-index="1">
+      <rect class="pod" x="425" y="150" width="320" height="76" rx="12" style="stroke:var(--accent);stroke-width:5"/>
+      <text class="b acc" x="450" y="185">new Pod</text>
+      <text class="m acc" x="450" y="213">…-q5n8r</text>
+    </g>
+  </svg>
+  <p class="take">Desired 3, actual 2 → the ReplicaSet creates 1. The other Pods keep serving.</p>
+  <aside class="notes">
+    Run kubectl get pods --watch in a second terminal while you delete. Old Pod: Terminating. New Pod: ContainerCreating, then Running, with a different name.
+    kubectl delete pods -l app=web deletes all three at once; three new ones appear within seconds.
+  </aside>
+</section>
+
+<section>
+  <h2>Where do the Pods land?</h2>
+  <svg class="d" viewBox="0 0 1170 380" role="img" aria-label="The scheduler spreads three Pods across two worker nodes; the control plane node is tainted and gets none">
+    <rect class="frame" x="10" y="20" width="360" height="300" rx="14"/>
+    <text class="b" x="30" y="58">control-plane node</text>
+    <rect class="cp" x="30" y="90" width="320" height="70" rx="10"/>
+    <text class="s" x="50" y="133">etcd, API server, …</text>
+    <text class="b badt" x="30" y="215">taint: no app Pods</text>
+    <text class="s" x="30" y="248">system Pods like kube-proxy</text>
+    <text class="s" x="30" y="274">carry a matching toleration</text>
+    <rect class="frame" x="400" y="20" width="360" height="300" rx="14"/>
+    <text class="b" x="420" y="58">worker 1</text>
+    <rect class="pod" x="420" y="90" width="320" height="70" rx="10"/>
+    <text class="m" x="440" y="133">web …-x2k4q  10.244.1.5</text>
+    <rect class="pod" x="420" y="180" width="320" height="70" rx="10"/>
+    <text class="m" x="440" y="223">web …-7hq9d  10.244.1.6</text>
+    <rect class="frame" x="790" y="20" width="370" height="300" rx="14"/>
+    <text class="b" x="810" y="58">worker 2</text>
+    <rect class="pod" x="810" y="90" width="330" height="70" rx="10"/>
+    <text class="m" x="830" y="133">web …-m3vtw  10.244.2.7</text>
+    <text class="s fragment" x="400" y="362">Each node hands out Pod IPs from its own range.</text>
+  </svg>
+  <p class="take">The scheduler spreads copies, so losing one machine doesn't take down all of them.</p>
+  <aside class="notes">
+    Command: kubectl describe node desktop-control-plane | grep -i taints.
+    A taint is like a "staff only" sign; a toleration is the staff ID card. minikube does not taint its control plane node.
+  </aside>
+</section>
+
+<!-- ============ 04 Service ============ -->
+<section class="divider">
+  <div class="num">04</div>
+  <h2>The Service</h2>
+  <p>One stable address in front of changing Pods</p>
+</section>
+
+<section>
+  <h2>The problem: Pod IPs keep changing</h2>
+  <p>Your backend runs as 3 Pods. Any of them can be replaced at any moment, with a new IP.</p>
+  <p class="fragment"><b>Which IP should the frontend call?</b></p>
+  <div class="card fragment">
+    <p>Your college office landline: the staff at the desk change every shift, but students always dial the <em>same number</em>, and whoever is on duty picks up.</p>
+    <p class="muted" style="margin:0">Landline number = Service · staff on duty = Pods · duty roster = EndpointSlice</p>
+  </div>
+  <p class="take">A Service is a fixed name and IP in front of whichever Pods are running now.</p>
+  <aside class="notes">
+    Link to lesson 5: Compose let containers call backend:3000 by name. Same idea, built for Pods that keep moving.
+  </aside>
+</section>
+
+<section>
+  <h2>How a Service finds its Pods</h2>
+  <svg class="d" viewBox="0 0 1170 460" role="img" aria-label="A client calls http://who; the Service who with ClusterIP 10.96.143.20 selects Pods labelled app=who; its EndpointSlice lists their IPs; a Pod labelled app=web is not selected">
+    <rect class="pod" x="850" y="10" width="310" height="92" rx="10"/>
+    <text class="m" x="870" y="48">app=who</text>
+    <text class="m" x="870" y="80">10.244.1.5</text>
+    <rect class="pod" x="850" y="122" width="310" height="92" rx="10"/>
+    <text class="m" x="870" y="160">app=who</text>
+    <text class="m" x="870" y="192">10.244.2.7</text>
+    <rect class="pod" x="850" y="234" width="310" height="92" rx="10"/>
+    <text class="m" x="870" y="272">app=who</text>
+    <text class="m" x="870" y="304">10.244.2.8</text>
+    <g class="dim">
+      <rect class="pod" x="850" y="346" width="310" height="92" rx="10"/>
+      <text class="m" x="870" y="384">app=web</text>
+      <text class="m" x="870" y="416">10.244.1.9</text>
+    </g>
+    <g class="fragment">
+      <rect class="svc" x="400" y="80" width="360" height="170" rx="14"/>
+      <text class="b" x="425" y="122">Service  who</text>
+      <text class="m" x="425" y="160">ClusterIP 10.96.143.20</text>
+      <text class="m acc" x="425" y="196">selector: app=who</text>
+      <text class="s" x="425" y="230">name and IP never change</text>
+      <path class="link" d="M762,130 L848,56"/>
+      <path class="link" d="M762,165 L848,168"/>
+      <path class="link" d="M762,200 L848,280"/>
+    </g>
+    <g class="fragment">
+      <rect class="box" x="400" y="290" width="360" height="150" rx="12"/>
+      <text class="b" x="425" y="330">EndpointSlice</text>
+      <text class="m" x="425" y="364">10.244.1.5</text>
+      <text class="m" x="425" y="392">10.244.2.7</text>
+      <text class="m" x="425" y="420">10.244.2.8</text>
+      <text class="s" x="600" y="392">live list,</text>
+      <text class="s" x="600" y="418">kept by a controller</text>
+    </g>
+    <g class="fragment">
+      <rect class="box" x="10" y="110" width="250" height="110" rx="12"/>
+      <text class="b" x="35" y="152">client Pod</text>
+      <text class="m" x="35" y="190">http://who</text>
+      <path class="arrow acc" d="M262,165 L396,165"/>
+    </g>
+  </svg>
+  <p class="take">The Service picks Pods by label, never by name. The app=web Pod gets no traffic.</p>
+  <aside class="notes">
+    Click 1: the Service and its selector. Click 2: the EndpointSlice, the live list of matching Pod IPs, updated within seconds when a Pod is replaced.
+    Click 3: a client calls http://who. DNS (CoreDNS) turns "who" into the ClusterIP. Full name: who.default.svc.cluster.local.
+  </aside>
+</section>
+
+<section>
+  <h2>kube-proxy: the ClusterIP isn't a machine</h2>
+  <ul>
+    <li>No process listens on <code>10.96.143.20</code></li>
+    <li class="fragment"><b>kube-proxy</b>, on every node, writes network rules into the node's Linux kernel</li>
+    <li class="fragment">Those rules catch packets sent to the ClusterIP and redirect each one to a Pod from the EndpointSlice</li>
+    <li class="fragment">That is how one Service shares requests between several Pods</li>
+  </ul>
+<pre class="term fragment"><span class="cmd">wget -qO- http://who | grep Hostname</span>      <span class="cm"># works: TCP port 80 is forwarded</span>
+<span class="out">Hostname: who-7d9f8c6b5-2xkqp</span>
+<span class="cmd">ping -c 2 who</span>                           <span class="cm"># no reply: ping is not forwarded</span></pre>
+  <p class="take">Ping failing doesn't mean the Service is broken. Test with the real port.</p>
+  <aside class="notes">
+    Run wget a few times: the Hostname changes between Pods. That's kube-proxy sharing requests.
+    The client here is a throwaway Pod: kubectl run tmp --rm -it --image=busybox:1.36 -- sh
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Replace every Pod. What changes?</h2>
+<pre class="term"><span class="cmd">kubectl get service who</span>
+<span class="out">NAME   TYPE        CLUSTER-IP     PORT(S)</span>
+<span class="out">who    ClusterIP   <span class="hi">10.96.143.20</span>   80/TCP</span>
+<span class="cmd">kubectl get endpointslices -l kubernetes.io/service-name=who</span>
+<span class="out">NAME        PORTS   ENDPOINTS</span>
+<span class="out">who-x7k2p   80      10.244.1.5,10.244.2.7,10.244.2.8</span></pre>
+<pre class="term fragment"><span class="cmd">kubectl delete pods -l app=who</span>
+<span class="cmd">kubectl get service who</span>
+<span class="out">who    ClusterIP   <span class="hi">10.96.143.20</span>   80/TCP</span>      <span class="cm"># same</span>
+<span class="cmd">kubectl get endpointslices -l kubernetes.io/service-name=who</span>
+<span class="out">who-x7k2p   80      <span class="ok">10.244.1.11,10.244.2.12,10.244.2.13</span></span></pre>
+  <p class="take">New Pod IPs, same Service IP. A client calling http://who never notices.</p>
+  <aside class="notes">
+    The Service was made with: kubectl expose deployment who --port=80. expose copies the Deployment's selector app=who.
+    ClusterIPs (10.96.x.x) come from a different range than Pod IPs (10.244.x.x).
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Debug it</div>
+  <h2>A Service with no Pods behind it</h2>
+<pre class="term"><span class="cmd">kubectl scale deployment/who --replicas=0</span>
+<span class="cmd">kubectl get endpointslices -l kubernetes.io/service-name=who</span>
+<span class="out">NAME        PORTS     ENDPOINTS</span>
+<span class="out">who-x7k2p   <span class="bad">&lt;unset&gt;</span>   <span class="bad">&lt;unset&gt;</span></span>
+<span class="cmd">kubectl run tmp --rm -it --image=busybox:1.36 -- wget -qO- -T 3 http://who</span>
+<span class="bad">wget: can't connect to remote host (10.96.143.20): Connection refused</span></pre>
+  <p class="fragment">The Service exists and DNS works, but no running, ready Pod matches the selector.</p>
+  <p class="fragment">Most common cause at work: a label typo. Compare with <code>kubectl get pods --show-labels</code>.</p>
+  <p class="take">When a Service “doesn't work”, check its endpoints first.</p>
+  <aside class="notes">
+    Bring them back afterwards: kubectl scale deployment/who --replicas=3.
+  </aside>
+</section>
+
+<section>
+  <h2>Three types of Service</h2>
+  <table>
+    <tr><th>Type</th><th>Reachable from</th><th>Used for</th></tr>
+    <tr><td><b>ClusterIP</b> <span class="muted">(default)</span></td><td>Only inside the cluster</td><td>Pod-to-Pod: frontend → backend, backend → database</td></tr>
+    <tr class="fragment"><td><b>NodePort</b></td><td>A port 30000–32767 on <em>every</em> node's IP</td><td>Rarely used directly; the building block for LoadBalancer</td></tr>
+    <tr class="fragment"><td><b>LoadBalancer</b></td><td>Outside the cluster, through an external load balancer</td><td>Letting users in. On AWS, a real AWS load balancer</td></tr>
+  </table>
+  <p class="take">Each type adds a way in on top of the one before: LoadBalancer → NodePort → Pods.</p>
+  <aside class="notes">
+    On the laptop, Docker Desktop plays the load balancer (minikube needs minikube tunnel).
+    kubectl expose deployment who --name=who-lb --type=LoadBalancer --port=8099 --target-port=80
+  </aside>
+</section>
+
+<section>
+  <h2>Three ports, three jobs</h2>
+  <svg class="d" viewBox="0 0 1170 440" role="img" aria-label="Inside the cluster a client calls the Service on port 8099; from outside, the load balancer sends traffic to nodePort 31233 on a node; both reach the container on targetPort 80">
+    <rect class="pod" x="880" y="140" width="280" height="150" rx="14"/>
+    <text class="b" x="905" y="185">Pod</text>
+    <text class="s" x="905" y="220">app listens on</text>
+    <text class="m acc" x="905" y="258">targetPort 80</text>
+    <g class="fragment">
+      <rect class="box" x="10" y="20" width="250" height="100" rx="12"/>
+      <text class="b" x="35" y="62">client Pod</text>
+      <text class="m" x="35" y="96">who-lb:8099</text>
+      <path class="arrow" d="M262,70 L426,70"/>
+      <rect class="svc" x="430" y="20" width="300" height="100" rx="12"/>
+      <text class="b" x="455" y="62">Service who-lb</text>
+      <text class="m acc" x="455" y="96">port 8099</text>
+      <path class="arrow" d="M732,70 C820,70 820,170 876,170"/>
+    </g>
+    <g class="fragment">
+      <rect class="box" x="10" y="310" width="250" height="110" rx="12"/>
+      <text class="b" x="35" y="352">browser</text>
+      <text class="s" x="35" y="384">→ load balancer</text>
+      <path class="arrow" d="M262,365 L426,365"/>
+      <rect class="frame" x="430" y="300" width="300" height="130" rx="12"/>
+      <text class="b" x="455" y="340">every node</text>
+      <text class="m acc" x="455" y="376">nodePort 31233</text>
+      <text class="s" x="455" y="410">kube-proxy forwards</text>
+      <path class="arrow" d="M732,365 C820,365 820,260 876,260"/>
+    </g>
+  </svg>
+<pre class="term fragment"><span class="out">PORT(S)  <span class="hi">8099</span>:<span class="hi">31233</span>/TCP</span>      <span class="cm"># port:nodePort — targetPort 80 is in the YAML</span></pre>
+  <aside class="notes">
+    port = where the Service listens. targetPort = where the container listens. nodePort = opened on every node (30000–32767; Kubernetes picks one unless you set it, for example nodePort: 30090).
+    On Docker Desktop you can't open the nodePort yourself: the nodes live inside its VM.
+  </aside>
+</section>
+
+<!-- ============ 05 Manifests ============ -->
+<section class="divider">
+  <div class="num">05</div>
+  <h2>Manifests</h2>
+  <p>The desired state, written in a file and kept in Git</p>
+</section>
+
+<section>
+  <h2>Imperative vs declarative</h2>
+  <div class="cols">
+    <div class="card bad">
+      <h3>Imperative</h3>
+      <p>Say <em>what to do</em>:</p>
+      <p><code>kubectl scale … --replicas=5</code><br><code>kubectl expose …</code></p>
+      <p class="muted" style="margin:0">Ring the canteen each time: “add one thali”, “cancel one dosa”. Miss a call and nobody knows the real order.</p>
+    </div>
+    <div class="card good fragment">
+      <h3>Declarative</h3>
+      <p>Say <em>what should exist</em>:</p>
+      <p><code>who.yaml</code>: a Deployment <code>who</code> with 5 replicas</p>
+      <p class="muted" style="margin:0">A shared sheet lists the order; the canteen makes whatever it says. The sheet is the manifest, the canteen is the control plane.</p>
+    </div>
+  </div>
+  <p class="take">Git records what should run and who changed it; the cluster shows what is running.</p>
+  <aside class="notes">
+    The 2 a.m. incident: "how many replicas should the backend have, and who changed it last week?" If the answer is only in someone's shell history, nobody knows.
+    Same control loop as lesson 9; now you write the desired state yourself. Terraform (module 3) and Argo CD build on this idea.
+  </aside>
+</section>
+
+<section>
+  <h2>Four top-level fields</h2>
+  <table>
+    <tr><th>Field</th><th>Meaning</th><th>Example</th></tr>
+    <tr><td><code>apiVersion</code></td><td>Which API group and version</td><td><code>apps/v1</code>, <code>v1</code></td></tr>
+    <tr><td><code>kind</code></td><td>The type of object</td><td><code>Deployment</code>, <code>Service</code></td></tr>
+    <tr><td><code>metadata</code></td><td>Its name and labels</td><td><code>name: who</code></td></tr>
+    <tr><td><code>spec</code></td><td>The desired state: what you want</td><td><code>replicas: 3</code></td></tr>
+  </table>
+  <p class="fragment" style="margin-top:24px">Read an object back and you also see <code>status</code>: what Kubernetes observes right now.</p>
+  <p class="take">You write spec. Controllers move the cluster towards it and report in status.</p>
+  <aside class="notes">
+    You don't have to write YAML from memory: kubectl create deployment who --image=traefik/whoami --replicas=3 --dry-run=client -o yaml.
+    kubectl explain deployment.spec.replicas reads the cluster's own docs for any field.
+  </aside>
+</section>
+
+<section>
+  <h2>Reading who.yaml: the Deployment</h2>
+  <div class="cols wide-left">
+<pre class="yaml"><code class="language-yaml" data-trim data-line-numbers="1-2|3-6|8|9-11|12-15|16-21|6,11,15" data-fragment-index="0">
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: who
+  labels:
+    app: who
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: who
+  template:
+    metadata:
+      labels:
+        app: who
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+          ports:
+            - containerPort: 80
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Which API, which object</h3>
+        <p>Deployments live in <code>apps/v1</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>The Deployment's own name tag</h3>
+        <p><code>name: who</code> names it. This label sits on the Deployment itself and <b>selects nothing</b>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="1">
+        <h3>Desired state</h3>
+        <p>Keep <b>3</b> Pods running. Inside <code>spec</code>, like everything below it.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="2">
+        <h3>Which Pods are mine?</h3>
+        <p>The Deployment manages Pods carrying <code>app: who</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="3">
+        <h3>The Pod blueprint</h3>
+        <p><code>template</code> is copied for every new Pod. Its labels are stamped on each Pod.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="4">
+        <h3>The container</h3>
+        <p><code>containers</code> is a list (<code>-</code> = one item). Fixed tag <code>v1.11</code>, not <code>latest</code>.</p>
+        <p><code>containerPort: 80</code> only documents the port; it doesn't open it.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="5">
+        <h3>Three <code>app: who</code>, three jobs</h3>
+        <p>6: tags the Deployment<br>11: finds the Pods<br>15: stamps the Pods</p>
+        <p><b>11 and 15 must match</b>, or Kubernetes rejects the file.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    Read it from the outside in. Indentation shows what belongs to what; spaces only, never tabs. VS Code + the Red Hat YAML extension underlines mistakes.
+  </aside>
+</section>
+
+<section>
+  <h2>Reading who.yaml: the Service</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="1|2-3|4-5|6-8|9-11" data-fragment-index="0">
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: who
+spec:
+  selector:
+    app: who
+  ports:
+    - port: 80
+      targetPort: 80
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Two objects, one file</h3>
+        <p>A line with just <code>---</code> separates YAML documents. This Service goes after the Deployment.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>The core API group</h3>
+        <p>Services belong to the core group, written as just <code>v1</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="1">
+        <h3>The name is the address</h3>
+        <p>A Pod in the same namespace calls <code>http://who</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="2">
+        <h3>Send traffic to…</h3>
+        <p>…Pods labelled <code>app: who</code>: the labels from the Deployment's <code>template</code>.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="3">
+        <h3>Two ports</h3>
+        <p><code>port</code>: what clients call. <code>targetPort</code>: where the app really listens.</p>
+        <p>No <code>type</code> line → <b>ClusterIP</b>.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    If the app listened on 3000, keep port: 80 and set targetPort: 3000.
+    For outside access on this setup: add type: LoadBalancer under spec.
+    A Service selector that matches no Pods is still valid YAML; it just has empty endpoints.
+  </aside>
+</section>
+
+<section>
+  <h2>Who uses the label?</h2>
+  <svg class="d" viewBox="0 0 1170 440" role="img" aria-label="The Deployment's template stamps app=who on each Pod; the Deployment selector manages Pods with that label; the Service selector sends them traffic; the Deployment's own metadata label selects nothing">
+    <rect class="pod" x="420" y="180" width="330" height="110" rx="14"/>
+    <text class="b" x="445" y="222">Pods</text>
+    <rect class="tag" x="445" y="238" width="140" height="38" rx="19"/>
+    <text class="m acc" x="462" y="264">app=who</text>
+    <g class="fragment">
+      <rect class="box" x="360" y="10" width="450" height="100" rx="12"/>
+      <text class="m" x="385" y="52">template.metadata.labels</text>
+      <text class="s" x="385" y="86">stamps the label on every new Pod</text>
+      <path class="arrow acc" d="M585,112 L585,176"/>
+    </g>
+    <g class="fragment">
+      <rect class="box" x="10" y="330" width="360" height="100" rx="12"/>
+      <text class="m" x="35" y="372">selector.matchLabels</text>
+      <text class="s" x="35" y="406">Deployment: manages these Pods</text>
+      <path class="link" d="M240,328 L470,294"/>
+    </g>
+    <g class="fragment">
+      <rect class="svc" x="800" y="330" width="360" height="100" rx="12"/>
+      <text class="m" x="825" y="372">Service selector</text>
+      <text class="s" x="825" y="406">sends traffic to these Pods</text>
+      <path class="link" d="M930,328 L700,294"/>
+    </g>
+    <g class="fragment">
+      <g class="dim">
+        <rect class="box" x="10" y="10" width="300" height="100" rx="12"/>
+        <text class="m" x="35" y="52">metadata.labels</text>
+        <text class="s" x="35" y="86">tag on the Deployment only</text>
+      </g>
+      <text class="b badt" x="35" y="150">selects nothing</text>
+    </g>
+  </svg>
+  <p class="take">The Deployment and the Service each look for the template's label, on their own.</p>
+  <aside class="notes">
+    Trace it: template labels → Pods. Deployment selector must match them so it can manage its Pods. Service selector independently looks for the same labels to send traffic.
+  </aside>
+</section>
+
+<!-- ============ 06 kubectl apply ============ -->
+<section class="divider">
+  <div class="num">06</div>
+  <h2>kubectl apply</h2>
+  <p>Hand the file to Kubernetes; it works out the steps</p>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Created, unchanged, configured</h2>
+<pre class="term"><span class="cmd">kubectl apply -f who.yaml</span>
+<span class="out">deployment.apps/who <span class="ok">created</span></span></pre>
+<pre class="term fragment"><span class="cmd">kubectl apply -f who.yaml</span>              <span class="cm"># same file again</span>
+<span class="out">deployment.apps/who <span class="hi">unchanged</span></span></pre>
+<pre class="term fragment"><span class="cm"># edit who.yaml: replicas: 3 → replicas: 5</span>
+<span class="cmd">kubectl apply -f who.yaml</span>
+<span class="out">deployment.apps/who <span class="ok">configured</span></span></pre>
+  <p class="take">Same file, same result: apply is idempotent, so CI can run it on every push.</p>
+  <aside class="notes">
+    Predict first before each run. Compare: kubectl create deployment who … a second time fails with "already exists".
+    -f names the file. Editing the file changes nothing in the cluster until you apply.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Preview first with kubectl diff</h2>
+<pre class="term"><span class="cmd">kubectl diff -f who.yaml</span>
+<span class="out">   kind: Deployment</span>
+<span class="bad">-  generation: 1</span>
+<span class="ok">+  generation: 2</span>
+<span class="out">   …</span>
+<span class="bad">-  replicas: 3</span>
+<span class="ok">+  replicas: 5</span></pre>
+  <p class="fragment">Nothing has changed in the cluster yet. <code>generation</code> goes up by one each time the spec changes.</p>
+  <p class="take">At work, kubectl diff is what you paste into a pull request for review.</p>
+  <aside class="notes">
+    Order: edit file → kubectl diff → kubectl apply. Reviewers see exactly what will change in production.
+  </aside>
+</section>
+
+<section>
+  <h2>Drift: the 2 a.m. hand fix</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>who.yaml (Git)</h3>
+      <p><code>replicas: 5</code></p>
+    </div>
+    <div class="card">
+      <h3>Cluster</h3>
+      <p class="fragment" data-fragment-index="0"><code>kubectl scale … --replicas=1</code></p>
+      <p class="fragment" data-fragment-index="0"><code>replicas: 1</code> <span class="muted">← drift</span></p>
+    </div>
+  </div>
+<pre class="term fragment" style="margin-top:22px"><span class="cmd">kubectl diff -f who.yaml</span>
+<span class="bad">-  replicas: 1</span>
+<span class="ok">+  replicas: 5</span>
+<span class="cmd">kubectl apply -f who.yaml</span>
+<span class="out">deployment.apps/who <span class="ok">configured</span></span>        <span class="cm"># back to 5</span></pre>
+  <p class="take">To keep 1 replica, change the file to replicas: 1 and apply it.</p>
+  <aside class="notes">
+    Drift = the cluster no longer matches the file. The hand-run kubectl scale changed only the live object. The next apply puts the file's value back.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Break it</div>
+  <h2>Kubernetes checks your manifest</h2>
+  <p>Template label changed to <code>app: whoo</code>:</p>
+<pre class="term" style="white-space:pre-wrap"><span class="cmd">kubectl apply -f bad.yaml</span>
+<span class="bad">The Deployment "who" is invalid: … `selector` does not match template `labels`</span></pre>
+  <p class="fragment">Field name typo, <code>replicass:</code>:</p>
+<pre class="term fragment" style="white-space:pre-wrap"><span class="cmd">kubectl apply -f bad.yaml</span>
+<span class="bad">Error from server (BadRequest): … unknown field "spec.replicass"</span></pre>
+  <p class="take">A rejected Deployment is not partly changed. Read the error for the field name.</p>
+  <aside class="notes">
+    Both errors are long; teach students to search them for the field path. Afterwards: rm bad.yaml.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Two objects in one file</h2>
+<pre class="term"><span class="cm"># who.yaml now holds the Deployment, ---, and the Service</span>
+<span class="cmd">kubectl apply -f who.yaml</span>
+<span class="out">deployment.apps/who <span class="hi">unchanged</span></span>
+<span class="out">service/who <span class="ok">created</span></span>
+<span class="cmd">kubectl delete -f who.yaml</span>
+<span class="out">deployment.apps "who" deleted</span>
+<span class="out">service "who" deleted</span></pre>
+  <ul>
+    <li class="fragment">Apply handles each object on its own</li>
+    <li class="fragment">Not one transaction: an earlier valid object may already be changed if a later one fails</li>
+    <li class="fragment">Removing an object from the file does <b>not</b> delete it from the cluster</li>
+  </ul>
+  <aside class="notes">
+    kubectl delete -f deletes the objects named in the file. Deletion is always a separate step.
+  </aside>
+</section>
+
+<section>
+  <h2>Commands to remember</h2>
+  <div class="cols">
+<pre class="term" style="font-size:20px"><span class="cm"># look</span>
+kubectl get nodes
+kubectl get deployment,replicaset,pods
+kubectl get pods --show-labels
+kubectl describe deployment who
+kubectl get endpointslices \
+  -l kubernetes.io/service-name=who</pre>
+<pre class="term" style="font-size:20px"><span class="cm"># change</span>
+kubectl create deployment who \
+  --image=traefik/whoami --replicas=3
+kubectl expose deployment who --port=80
+kubectl diff -f who.yaml
+kubectl apply -f who.yaml
+kubectl delete -f who.yaml</pre>
+  </div>
+  <p class="take">Imperative commands to explore; a file and kubectl apply for anything you keep.</p>
+</section>
+
+<!-- ============ Check ============ -->
+<section class="divider">
+  <div class="num">?</div>
+  <h2>Check yourself</h2>
+  <p>Answer first, then click</p>
+</section>
+
+<section>
+  <div class="kicker">Check 1</div>
+  <p class="q">A Deployment runs 4 Pods. You delete 2 of them. What happens next, and which part of Kubernetes does it?</p>
+  <div class="a fragment">The ReplicaSet controller sees 2 running against 4 desired and creates 2 new Pods, with new names and usually new IPs. The scheduler places them and the kubelets start them. The other 2 Pods keep serving the whole time.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 2</div>
+  <p class="q">The Service <code>who</code> exists and DNS works, but <code>wget http://who</code> fails and its endpoints show <code>&lt;unset&gt;</code>. What do you check first?</p>
+  <div class="a fragment">No running, ready Pod matches the Service's selector. Compare the selector (<code>kubectl describe service who</code>) with the Pod labels (<code>kubectl get pods --show-labels</code>): a label typo, or the Deployment scaled to 0.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 3</div>
+  <p class="q"><code>ping who</code> gets no reply, but <code>wget http://who</code> works. Is the Service broken?</p>
+  <div class="a fragment">No. The ClusterIP is not a machine. kube-proxy's rules forward only the Service's port (80, over TCP). Ping uses a different protocol, so nothing answers it.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 4</div>
+  <p class="q">Your app listens on port 3000. Other Pods should call it as <code>http://api</code>. What are <code>port</code> and <code>targetPort</code> in the Service?</p>
+  <div class="a fragment"><code>port: 80</code>, because <code>http://api</code> means port 80. <code>targetPort: 3000</code>, where the process really listens. <code>containerPort</code> in the Deployment only documents it.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 5</div>
+  <p class="q">You run <code>kubectl apply -f who.yaml</code> twice without editing the file. What does the second run print, and why does that matter?</p>
+  <div class="a fragment"><code>deployment.apps/who unchanged</code>. Nothing in the file differs from the cluster. Apply is idempotent, so a CI pipeline can safely run it on every push.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 6</div>
+  <p class="q">A teammate ran <code>kubectl scale deployment/who --replicas=1</code>. The file says 5. What does <code>kubectl diff</code> show, and what does the next apply do?</p>
+  <div class="a fragment">The diff shows <code>replicas: 1</code> → <code>replicas: 5</code>; the next apply restores 5. If 1 is really wanted, change the file to <code>replicas: 1</code> and apply it, so Git stays the record.</div>
+</section>
+
+<section class="title">
+  <div class="kicker">Read next</div>
+  <h2>Do it yourself</h2>
+  <ul>
+    <li><a href="../lessons/0009-your-first-cluster.html">Lesson 9: Your first cluster</a></li>
+    <li><a href="../lessons/0010-services.html">Lesson 10: Services</a></li>
+    <li><a href="../lessons/0011-manifests-apply.html">Lesson 11: Manifests &amp; kubectl apply</a></li>
+  </ul>
+</section>
+
+</div></div>
+
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="vendor/reveal/plugin/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    center: false,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealNotes, RevealHighlight],
+    keyboard: {
+      // T cycles the course theme: system → light → dark
+      84: function () {
+        var btn = document.querySelector('.theme-toggle');
+        if (btn) btn.click();
+      }
+    }
+  });
+</script>
+</body>
+</html>

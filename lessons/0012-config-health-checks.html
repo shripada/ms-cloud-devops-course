@@ -27,13 +27,19 @@ cd ~/k8s-practice</code></pre>
 
 <h2>Do it: config</h2>
 <ol class="steps">
-<li>Create a ConfigMap and a Secret. Here imperative commands are fine for a quick test; at work these would be files too.
-<pre><code>kubectl create configmap app-config \
-  --from-literal=LOG_LEVEL=info \
-  --from-literal=PAYMENT_GATEWAY_URL=https://pay.example.com
+<li>Create the ConfigMap declaratively. Write <code>app-config.yaml</code>:
+<pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+  PAYMENT_GATEWAY_URL: https://pay.example.com</code></pre>
+Apply the manifest, then create the Secret separately:
+<pre><code>kubectl apply -f app-config.yaml
 kubectl create secret generic db-secret --from-literal=DB_PASSWORD=Fest2026
 kubectl get configmap app-config -o yaml</code></pre>
-The ConfigMap shows your values in plain text, under <code>data:</code>.</li>
+The ConfigMap shows the same values in plain text under <code>data:</code>. Keep non-sensitive configuration like this in declarative manifests so it can be reviewed and applied consistently.</li>
 <li>Now look at the Secret, and decode it:
 <pre><code>kubectl get secret db-secret -o yaml
 kubectl get secret db-secret -o jsonpath='{.data.DB_PASSWORD}' | base64 -d; echo</code></pre>
@@ -70,10 +76,8 @@ spec:
 <pre><code>kubectl apply -f cfg.yaml
 kubectl logs deploy/cfg --tail=2</code></pre>
 You see <code>LOG_LEVEL=info</code> and <code>password_length=8</code>.</li>
-<li>Change the setting while the app runs. <b>Predict first:</b> after you edit the ConfigMap, will the running app print <code>debug</code>?
-<pre><code>kubectl create configmap app-config --from-literal=LOG_LEVEL=debug \
-  --from-literal=PAYMENT_GATEWAY_URL=https://pay.example.com \
-  --dry-run=client -o yaml | kubectl apply -f -
+<li>Change the setting while the app runs. <b>Predict first:</b> after you edit the ConfigMap, will the running app print <code>debug</code>? In <code>app-config.yaml</code>, change <code>LOG_LEVEL: info</code> to <code>LOG_LEVEL: debug</code>, then apply the manifest again:
+<pre><code>kubectl apply -f app-config.yaml
 sleep 10; kubectl logs deploy/cfg --tail=1</code></pre>
 Still <code>info</code>. Environment variables are copied into the process once, when the container starts, just like in any Linux program. Editing the ConfigMap doesn't touch a running process. Restart the Pods to pick up the change:
 <pre><code>kubectl rollout restart deployment/cfg
@@ -176,7 +180,7 @@ kubectl exec $POD -- rm /usr/share/nginx/html/ready
 sleep 20
 kubectl get pods -l app=slow
 kubectl get endpointslices -l kubernetes.io/service-name=slow</code></pre>
-That Pod is <code>0/1</code> but <code>RESTARTS</code> is still 0, and the EndpointSlice now lists only one IP. The Service stops sending users to it, and nothing is killed. Put the file back (<code>kubectl exec $POD -- sh -c 'echo ok &gt; /usr/share/nginx/html/ready'</code>) and it rejoins. Clean up: <code>kubectl delete -f slow.yaml</code>, then <code>kubectl delete configmap app-config</code> and <code>kubectl delete secret db-secret</code>.</li>
+That Pod is <code>0/1</code> but <code>RESTARTS</code> is still 0, and the EndpointSlice now lists only one IP. The Service stops sending users to it, and nothing is killed. Put the file back (<code>kubectl exec $POD -- sh -c 'echo ok &gt; /usr/share/nginx/html/ready'</code>) and it rejoins. Clean up: <code>kubectl delete -f slow.yaml</code>, then <code>kubectl delete -f app-config.yaml</code> and <code>kubectl delete secret db-secret</code>.</li>
 </ol>
 
 <div class="trap"><b>Drill: spot the problems.</b> A canteen-ordering API reads <code>MENU_URL</code>, <code>LOG_LEVEL</code> and <code>UPI_API_KEY</code>. It takes about 45 seconds to load the day's menu before it can serve orders. Find four problems in this part of its Deployment, and say what each one causes.

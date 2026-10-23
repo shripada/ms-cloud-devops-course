@@ -1,0 +1,155 @@
+/* Shared look for the reveal.js decks in slides/.
+   Same tokens as assets/course.css, tuned for projectors: darker muted text,
+   thick strokes, big type. Light/dark follows the course theme toggle. */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root{
+  --bg:#fffff8;--fg:#1f1f1f;--muted:#454545;--rule:#cfcabb;--accent:#0a5fb4;
+  --code-bg:#f1eee2;--ok:#1d6a33;--bad:#b3261e;--note:#f7f3df;
+  --panel:#f1eee2;--line:#3a3a3a;
+  --cp:#f5ecd4;--cp-line:#7a5a00;
+  --pod:#e2f1e6;--pod-line:#1d6a33;
+  --svc:#e0ecf9;--svc-line:#0a5fb4;
+  --hl-bg:rgba(10,95,180,.10);
+  --hl-attr:#0a5fb4;--hl-str:#1d6a33;--hl-num:#9a3412;--hl-meta:#454545;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#17171a;--fg:#ecebe5;--muted:#c2bfb5;--rule:#4a4944;--accent:#7ab8ff;
+  --code-bg:#24242a;--ok:#7fd99a;--bad:#ff9a90;--note:#2a281f;
+  --panel:#24242a;--line:#cfccc2;
+  --cp:#2e2915;--cp-line:#e6c55c;
+  --pod:#15301f;--pod-line:#7fd99a;
+  --svc:#132741;--svc-line:#7ab8ff;
+  --hl-bg:rgba(122,184,255,.14);
+  --hl-attr:#7ab8ff;--hl-str:#9fe0b0;--hl-num:#ffbb85;--hl-meta:#c2bfb5;
+}}
+:root[data-theme="dark"]{
+  --bg:#17171a;--fg:#ecebe5;--muted:#c2bfb5;--rule:#4a4944;--accent:#7ab8ff;
+  --code-bg:#24242a;--ok:#7fd99a;--bad:#ff9a90;--note:#2a281f;
+  --panel:#24242a;--line:#cfccc2;
+  --cp:#2e2915;--cp-line:#e6c55c;
+  --pod:#15301f;--pod-line:#7fd99a;
+  --svc:#132741;--svc-line:#7ab8ff;
+  --hl-bg:rgba(122,184,255,.14);
+  --hl-attr:#7ab8ff;--hl-str:#9fe0b0;--hl-num:#ffbb85;--hl-meta:#c2bfb5;
+}
+
+html,body,.reveal-viewport{background:var(--bg);color:var(--fg)}
+.reveal{font:30px/1.4 "Source Serif 4",Georgia,serif;color:var(--fg)}
+.reveal .slides{text-align:left}
+.reveal .slides section{box-sizing:border-box;height:100%;padding:34px 56px 0}
+.reveal h1,.reveal h2,.reveal h3{font-family:"Source Serif 4",Georgia,serif;color:var(--fg);margin:0 0 .45em;line-height:1.15}
+.reveal h1{font-size:68px;font-weight:400}
+.reveal h2{font-size:46px;font-weight:600}
+.reveal h3{font-size:34px;font-weight:600}
+.reveal p{margin:0 0 .6em}
+.reveal ul{margin:0 0 .6em 1.1em;padding:0}
+.reveal li{margin:.25em 0}
+.reveal a{color:var(--accent)}
+.reveal b,.reveal strong{font-weight:600}
+.reveal em{font-style:italic}
+.reveal .muted{color:var(--muted)}
+.reveal .kicker{font:600 20px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.reveal :not(pre)>code{white-space:nowrap}
+.reveal code{font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--code-bg);padding:.05em .3em;border-radius:4px}
+
+/* One-line takeaway pinned to the bottom of a slide */
+.reveal .take{position:absolute;left:56px;right:56px;bottom:34px;margin:0;padding:12px 18px;
+  border-left:6px solid var(--accent);background:var(--panel);font-size:28px;font-weight:600}
+
+/* Title and section-divider slides */
+.reveal section.title{padding:170px 90px 0}
+.reveal section.title h1{margin-bottom:.3em}
+.reveal section.title .sub{font-size:32px;color:var(--muted);font-style:italic}
+.reveal section.divider{padding:200px 90px 0}
+.reveal section.divider .num{font:600 120px "JetBrains Mono",monospace;color:var(--accent);line-height:1}
+.reveal section.divider h2{font-size:64px;font-weight:400;margin-top:.2em}
+.reveal section.divider p{font-size:32px;color:var(--muted)}
+
+/* Two columns */
+.reveal .cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
+.reveal .cols.wide-left{grid-template-columns:1.25fr 1fr}
+.reveal .card{background:var(--panel);border:3px solid var(--rule);border-radius:10px;padding:18px 22px}
+.reveal .card h3{font-size:30px;margin-bottom:.3em}
+.reveal .card.good{border-color:var(--ok)}
+.reveal .card.bad{border-color:var(--bad)}
+
+/* Tables */
+.reveal table{border-collapse:collapse;width:100%;font-size:27px}
+.reveal th,.reveal td{text-align:left;padding:10px 14px;border-bottom:3px solid var(--rule);vertical-align:top}
+.reveal th{font-weight:600;color:var(--muted)}
+
+/* Terminal blocks: command lines plus trimmed output */
+.reveal pre.term{margin:0 0 18px;padding:16px 20px;background:var(--code-bg);border-radius:8px;
+  font:22px/1.45 "JetBrains Mono",monospace;white-space:pre;overflow:hidden;color:var(--fg);box-shadow:none;width:auto}
+.reveal pre.term .cmd{font-weight:600}
+.reveal pre.term .cmd::before{content:"$ ";color:var(--accent)}
+.reveal pre.term .out{color:var(--muted)}
+.reveal pre.term .hi{color:var(--accent);font-weight:600}
+.reveal pre.term .ok{color:var(--ok);font-weight:600}
+.reveal pre.term .bad{color:var(--bad);font-weight:600}
+.reveal pre.term .cm{color:var(--muted);font-style:italic}
+
+/* YAML with highlight.js and line stepping */
+.reveal pre.yaml{margin:0;box-shadow:none;width:100%;font-size:21px;line-height:1.3}
+.reveal pre.yaml code{display:block;background:var(--code-bg);padding:12px 8px;border-radius:8px;max-height:none;overflow:hidden;font-family:"JetBrains Mono",monospace}
+.reveal .hljs{color:var(--fg);background:var(--code-bg)}
+.reveal .hljs-attr{color:var(--hl-attr);font-weight:600}
+.reveal .hljs-string{color:var(--hl-str)}
+.reveal .hljs-number,.reveal .hljs-literal{color:var(--hl-num)}
+.reveal .hljs-bullet,.reveal .hljs-meta,.reveal .hljs-comment{color:var(--hl-meta)}
+.reveal .hljs-ln-numbers{color:var(--muted);padding-right:14px!important;text-align:right;user-select:none}
+.reveal .hljs.has-highlights tr:not(.highlight-line){opacity:.3}
+.reveal .hljs.has-highlights tr.highlight-line td{background:var(--hl-bg)}
+.reveal pre code table{font-size:inherit;width:auto}
+.reveal pre code table td{padding:0 6px;border:0}
+
+/* Notes beside the YAML that change with each highlight step */
+.reveal .stack{display:grid}
+.reveal .stack>*{grid-area:1/1}
+.reveal .step{font-size:28px}
+.reveal .step h3{font-size:30px;color:var(--accent)}
+
+/* Check-question slides */
+.reveal .q{font-size:36px;font-weight:600;line-height:1.3;margin-bottom:24px}
+.reveal .a{border-left:6px solid var(--ok);background:var(--panel);padding:16px 22px;font-size:28px}
+
+/* Diagrams: inline SVG coloured from the tokens above */
+.reveal svg.d{display:block;width:100%;height:auto;margin:0 auto;overflow:visible}
+.d text{fill:var(--fg);font-family:"Source Serif 4",Georgia,serif;font-size:24px}
+.d text.b{font-weight:600}
+.d text.s,.d tspan.s{font-size:20px;fill:var(--muted);font-weight:400}
+.d text.m{font-family:"JetBrains Mono",monospace;font-size:20px}
+.d text.acc{fill:var(--accent)}
+.d text.okt{fill:var(--ok)}
+.d text.badt{fill:var(--bad)}
+.d .box{fill:var(--panel);stroke:var(--line);stroke-width:3}
+.d .frame{fill:none;stroke:var(--line);stroke-width:3;stroke-dasharray:10 7}
+.d .cp{fill:var(--cp);stroke:var(--cp-line);stroke-width:3}
+.d .pod{fill:var(--pod);stroke:var(--pod-line);stroke-width:3}
+.d .svc{fill:var(--svc);stroke:var(--svc-line);stroke-width:4}
+.d .dim{opacity:.35}
+.d .arrow{fill:none;stroke:var(--line);stroke-width:3.5;marker-end:url(#arrow)}
+.d .arrow.acc{stroke:var(--accent);marker-end:url(#arrow-acc)}
+.d .link{fill:none;stroke:var(--accent);stroke-width:3;stroke-dasharray:8 6}
+.d .cross{stroke:var(--bad);stroke-width:7;stroke-linecap:round}
+.d .tag{fill:var(--bg);stroke:var(--accent);stroke-width:2.5}
+#arrow path{fill:var(--line)}
+#arrow-acc path{fill:var(--accent)}
+
+/* reveal.js chrome */
+.reveal .controls{color:var(--accent)}
+.reveal .progress{color:var(--accent);height:5px}
+.reveal .slide-number{background:transparent;color:var(--muted);font:18px "JetBrains Mono",monospace;right:auto;left:14px;bottom:10px}
+
+/* Theme toggle from assets/theme.js: small and faint so it doesn't distract on a projector */
+.theme-toggle{position:fixed;top:12px;right:12px;z-index:50;display:inline-flex;align-items:center;gap:6px;
+  padding:6px 8px;border:1px solid var(--rule);border-radius:999px;background:var(--bg);color:var(--muted);
+  font:600 12px "JetBrains Mono",monospace;cursor:pointer;opacity:.35;transition:opacity .2s}
+.theme-toggle:hover,.theme-toggle:focus-visible{opacity:1}
+.theme-toggle svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.theme-toggle .label{display:none}
+@media print{.theme-toggle{display:none}}
+.reveal pre.yaml{position:relative}
+.reveal pre.yaml code.hljs{font-size:20px;line-height:1.28;padding:10px 8px;white-space:pre}
+.reveal pre.yaml.big code.hljs{font-size:27px}
