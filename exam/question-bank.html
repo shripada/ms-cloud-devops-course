@@ -1,0 +1,418 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Question Bank</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script>
+<style>.quiz ol,.quiz ul{margin:.3em 0 .3em 1.4em}.quiz .marks{text-align:right;color:var(--muted);font-size:.85rem;margin:.2em 0 1em}.quiz .tag{font-weight:400;color:var(--muted);font-size:.85rem}</style></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Question bank</div>
+<h1>Question bank — DevOps, Git, CI, Docker and Kubernetes</h1>
+<p class="lede">Three sets of six questions. Each question carries <b>10 marks</b> in two parts of <b>5 marks</b>; the number in square brackets is the marks for that sub-part.</p>
+<h2>Set A</h2>
+<div class="quiz">
+<p class="q">Q1. SDLC and the DevOps life cycle <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> A food-delivery app must ship a change to its delivery-fee calculation within two weeks.</p>
+<ol type="i">
+<li>Summarize the phases of the traditional software development life cycle (SDLC). <i>[3]</i></li>
+<li>Explain how shared ownership between developers and operations, automation, and small, frequent releases each shorten the time to deliver this change. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> </p>
+<ol type="i">
+<li>Differentiate between Continuous Integration, Continuous Delivery and Continuous Deployment. <i>[3]</i></li>
+<li>Demonstrate, with a neat pipeline diagram, where the automated tests run and where a manual approval step sits. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q2. Version control with Git and GitHub <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>Describe how Git records history as a chain of commits identified by hashes. <i>[2]</i></li>
+<li>Explain a three-way merge, with commit-history diagrams before and after the merge. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> A branch protection rule on <code>main</code> requires two approving reviews and a passing CI check before merging.</p>
+<ol type="i">
+<li>Discuss forks and pull requests. <i>[2]</i></li>
+<li>Report the steps of a typical code review process <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q3. Continuous Integration and testing <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> The GitHub Actions workflow below is for the Express orders service. It should:</p>
+<ul>
+<li>run on every pull request to <code>main</code> and every push to <code>main</code></li>
+<li>install the exact dependency versions in the lock file, then run the tests</li>
+<li>only if the tests pass, build an image tagged with the commit SHA and push it to the GitHub Container Registry</li>
+</ul>
+<pre><code>name: orders-ci
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm install
+      - run: docker build -t ghcr.io/fooddash/orders:latest .
+      - run: npm test || true
+      - run: docker push ghcr.io/fooddash/orders:latest</code></pre>
+<ol type="i">
+<li>Comment on any three errors or bad practices, with the fix for each. <i>[3]</i></li>
+<li>Infer the effect of each on the pipeline. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> </p>
+<ol type="i">
+<li>Classify the tests in continuous testing into the levels of the test pyramid (unit, integration and end-to-end). <i>[3]</i></li>
+<li>Explain why most automated tests should sit at the bottom of the pyramid. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q4. Docker <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>With a neat diagram, differentiate between a virtual machine and a Docker container in terms of kernel, boot time, image size and isolation. <i>[3]</i></li>
+<li>Interpret the role of Linux namespaces in making a container behave like a separate machine. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> The Dockerfile below packages a Python Flask app that listens on port 8080. Its code is in <code>src/</code>, its dependencies are in <code>requirements.txt</code>, and users upload profile photos to /app/media.</p>
+<pre><code>FROM python:latest
+WORKDIR /app
+COPY . .
+RUN pip install -r requirements.txt
+ENV DB_PASSWORD=root@123
+EXPOSE 5000
+CMD ["python", "src/app.py"]</code></pre>
+<ol type="i">
+<li>Annotate the Dockerfile to mark any three errors or bad practices, with the fix for each. <i>[3]</i></li>
+<li>Describe how a named volume keeps the uploaded photos when the container is removed and re-created. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q5. Kubernetes architecture <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> A cluster has one control plane node and three worker nodes. <code>kubectl apply -f deployment.yaml</code> is run for a Deployment with <code>replicas: 4</code>.</p>
+<ol type="i">
+<li>Analyze what <code>kubectl</code>, the API server and etcd do with this request. <i>[3]</i></li>
+<li>Analyze what the cluster does when one worker node is switched off. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> A Deployment runs five replicas of the orders API.</p>
+<ol type="i">
+<li>With a diagram, analyze the relationship between a Deployment, a ReplicaSet and a Pod. <i>[3]</i></li>
+<li>Examine what the cluster does when one of its Pods is deleted with <code>kubectl delete pod</code>. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+<div class="quiz">
+<p class="q">Q6. Deploying a containerized application <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> The orders API below must:</p>
+<ul>
+<li>run four replicas</li>
+<li>be updated without downtime</li>
+<li>receive traffic only once a Pod is ready to serve</li>
+</ul>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+spec:
+  replicas: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+      - name: orders
+        image: ghcr.io/fooddash/orders:2.1.3
+        ports:
+        - containerPort: 8080
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080</code></pre>
+<ol type="i">
+<li>Detect the three problems that prevent this, and state how to fix each. <i>[3]</i></li>
+<li>Analyze how your corrected manifest protects users during a rolling update. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> In the food-delivery app:</p>
+<ul>
+<li>users reach the React frontend from outside the cluster on node port 30090</li>
+<li>the orders API is called only by the frontend’s Nginx proxy, inside the cluster</li>
+<li>the MySQL database is used only by the orders API</li>
+</ul>
+<pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+spec:
+  type: LoadBalancer
+  selector:
+    app: orders
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+spec:
+  type: NodePort
+  selector:
+    app: db
+  ports:
+    - port: 3306
+      targetPort: 3306
+      nodePort: 30306</code></pre>
+<ol type="i">
+<li>Detect the three problems with how these Services expose the components, and state the fix for each. <i>[3]</i></li>
+<li>Analyze the risk or failure each problem causes. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+<h2>Set B</h2>
+<div class="quiz">
+<p class="q">Q1. Software methodologies and the DevOps life cycle <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> The development team of an online bookstore wants to release changes quickly; the operations team wants the system to stay stable.</p>
+<ol type="i">
+<li>Explain the Agile way of working with sprints, user stories and retrospectives. <i>[3]</i></li>
+<li>Explain how DevOps extends Agile beyond the point where the code is written. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> One change is made to an online bookstore’s search page.</p>
+<ol type="i">
+<li>Draw a neat diagram of the DevOps life cycle. <i>[2]</i></li>
+<li>Trace the change from planning to monitoring, stating at each stage what happens to it and what artifact or record it produces. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q2. Version control with Git <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> A developer’s push to develop is rejected: “Updates were rejected because the remote contains work that you do not have locally”.</p>
+<ol type="i">
+<li>Explain remotes and remote-tracking branches such as <code>origin/develop</code>. <i>[2]</i></li>
+<li>Explain why the push was rejected and how to ensure push succeeds without loosing any change? <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> While merging <code>feature/discount</code> into <code>main</code>, a developer sees the lines below in <code>checkout.js</code>. Both changes must be kept, with the GST rate from <code>main</code>.</p>
+<pre><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
+const GST_RATE = 0.12;
+=======
+const GST_RATE = 0.05;
+const DISCOUNT_PERCENT = 10;
+&gt;&gt;&gt;&gt;&gt;&gt;&gt; feature/discount</code></pre>
+<ol type="i">
+<li>Explain how a merge conflict arises. <i>[2]</i></li>
+<li>Explain the meaning of each marker and how to resolve conflicts so that changes of feature/discount are taken into consideration. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q3. Continuous Integration with GitHub Actions <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> For the Express catalogue API, a team wants:</p>
+<ul>
+<li>the tests to run on every pull request to develop</li>
+<li>a Docker image built and pushed to a registry only when code is pushed to <code>main</code></li>
+</ul>
+<ol type="i">
+<li>Explain the terms workflow, event, job, runner and step in GitHub Actions. <i>[3]</i></li>
+<li>Explain how the team should arrange the events and jobs. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> A CI pipeline builds a new image from the same commit separately for dev, QA and production, and tags every image <code>latest</code>. A bug appeared in production that could not be reproduced in QA.</p>
+<ol type="i">
+<li>Explain what a build artifact is and the role of a container registry in CI. <i>[2]</i></li>
+<li>Explain how tagging images with the commit SHA or a version number helps to trace and roll back a release. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q4. Docker images and containers <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>Differentiate between a Docker image and a container. <i>[2]</i></li>
+<li>With a state diagram, explain the life cycle of a container (created, running, paused, stopped and removed), stating what causes each transition. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> The Dockerfile below packages a TypeScript Express catalogue API: <code>npm run build</code> compiles <code>src/</code> into build/, and the app starts with <code>node build/index.js</code>. The team needs:</p>
+<ul>
+<li>a small image</li>
+<li>running as a non-root user</li>
+<li>quick rebuilds when only the source code changes</li>
+</ul>
+<pre><code>FROM node:20
+COPY . /app
+WORKDIR /app
+RUN npm install
+RUN npm run build
+EXPOSE 4000
+CMD ["node", "build/index.js"]</code></pre>
+<ol type="i">
+<li>Detect any three problems that prevent this, and state how to fix each. <i>[3]</i></li>
+<li>Explain why a multi-stage build makes the final image smaller. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q5. Kubernetes architecture and cluster set-up <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>With a neat diagram, differentiate the components of the Kubernetes control plane and of a worker node. <i>[3]</i></li>
+<li>Analyze what happens to an application that is already running when the only control plane node goes down. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> Three ways of getting a cluster: a local multi-node cluster on a laptop (kind or minikube), a cluster built with kubeadm on four virtual machines, and a managed cluster such as Google GKE.</p>
+<ol type="i">
+<li>Compare the three, and analyze which suits a developer’s laptop, a college lab and a production bookstore. <i>[3]</i></li>
+<li>Explain the role of the kubeconfig file and contexts when one engineer works with two clusters. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+<div class="quiz">
+<p class="q">Q6. Services and Ingress <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> In the online bookstore, the React frontend must be reachable from the internet, the API is used by the frontend, and the database is used only by the API.</p>
+<ol type="i">
+<li>Analyze the Service types ClusterIP, NodePort and LoadBalancer. <i>[2]</i></li>
+<li>Choose one for each of the three components, and justify each choice. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> The Ingress below should send every request for <code>books.example.com</code> to the <code>web</code> Service, and requests under <code>/api</code> to the catalog Service. Both Services listen on port 80; the ingress controller’s class is <code>nginx</code>.</p>
+<pre><code>apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bookstore
+spec:
+  rules:
+  - host: books.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Exact
+        backend:
+          service:
+            name: web
+            port:
+              number: 8080
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: books-api
+            port:
+              number: 80</code></pre>
+<ol type="i">
+<li>Detect any three errors, and state how to fix each. <i>[3]</i></li>
+<li>Analyze why one Ingress is cheaper and simpler than giving each Service its own cloud load balancer. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+<h2>Set C</h2>
+<div class="quiz">
+<p class="q">Q1. DevOps principles and life cycle <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>Explain the Waterfall model with a neat diagram. <i>[2]</i></li>
+<li>Explain the DevOps principles of culture, automation, lean flow, measurement and sharing, with one example of each from a team running a movie-ticket booking app. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> </p>
+<ol type="i">
+<li>Draw a neat diagram of the continuous practices of the DevOps life cycle. <i>[2]</i></li>
+<li>For continuous development, integration, testing, deployment and monitoring, explain the goal, the category of tool used and one example tool. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q2. Branching and undoing changes in Git <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>Explain GitHub Flow with a branch diagram. <i>[2]</i></li>
+<li>Explain Git Flow (feature, develop, release and hotfix branches) with a branch diagram. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> </p>
+<ol type="i">
+<li>With commit-history diagrams, explain the three modes of <code>git reset</code>: soft, mixed and hard. <i>[3]</i></li>
+<li>Explain how <code>git revert</code> differs. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q3. Continuous Integration and continuous testing <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> </p>
+<ul>
+<li>Explain the core practices of Continuous Integration: commit often, build every commit, keep the build fast, and fix a broken build immediately. <i>[3]</i></li>
+<li>With a neat diagram, describe a GitHub Actions pipeline for the Express bookings API, from a push to GitHub to a Docker image in a registry. <i>[2]</i></li>
+</ul>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> A developer opens a pull request for the Express bookings API. The CI workflow runs the automated tests, and one test fails.</p>
+<ol type="i">
+<li>Differentiate between manual and automated testing, with one advantage of each. <i>[2]</i></li>
+<li>Explain what the pipeline does with the rest of the run. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q4. Docker architecture and networking <span class="tag">(10 marks · CO1 · PO3)</span></p>
+<p><b>(a)</b> <code>docker run -d -p 9090:80 httpd:2.4</code> is run on a machine that does not yet have the image.</p>
+<ol type="i">
+<li>With a neat diagram, explain the Docker architecture: the client, the daemon, the container runtime and the registry. <i>[2]</i></li>
+<li>Trace, step by step, what happens when the command runs. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+<p><b>(b)</b> An Express bookings API container cannot connect to a MySQL container at localhost:3306.</p>
+<ol type="i">
+<li>Explain why <code>localhost</code> inside a container does not reach another container. <i>[2]</i></li>
+<li>Explain how to connect the two containers so the API reaches the database by its container name. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO1 · PO3 · BL2)</p>
+</div>
+<div class="quiz">
+<p class="q">Q5. Declarative management and organising a cluster <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> </p>
+<ol type="i">
+<li>Analyze the difference between managing containers imperatively, with one-off commands, and declaratively, with manifests applied by <code>kubectl apply</code>. <i>[3]</i></li>
+<li>Analyze what happens when someone edits a live object by hand and the manifest is applied again. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> One cluster is shared by a development team and a QA team. The qa namespace has a ResourceQuota of 6 CPUs, 12 GiB of memory and 30 Pods.</p>
+<ol type="i">
+<li>Analyze how namespaces, labels and ResourceQuotas keep the two teams from affecting each other. <i>[2]</i></li>
+<li>Examine what happens when the QA team tries to start a Pod that would go over the quota. <i>[3]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+<div class="quiz">
+<p class="q">Q6. Exposing and scheduling workloads <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p><b>(a)</b> The React frontend runs as three replicas behind a NodePort Service on node port 31000.</p>
+<ol type="i">
+<li>With a diagram, analyze the path a browser request takes from the node’s port through kube-proxy and the Service to one of the Pods. <i>[3]</i></li>
+<li>Examine what happens to requests if the node running one of the Pods fails. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+<p><b>(b)</b> A movie-ticket booking app backs up its MySQL database every night at 01:30 using a CronJob.</p>
+<ol type="i">
+<li>Analyze the effect of the <code>restartPolicy</code>, <code>backoffLimit</code> and <code>concurrencyPolicy</code> settings on this job. <i>[3]</i></li>
+<li>Examine what should happen if one backup is still running when the next is due, and which setting controls it. <i>[2]</i></li>
+</ol>
+<p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
+</div>
+</main></body></html>
