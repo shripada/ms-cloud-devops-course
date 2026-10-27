@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Data, Jobs &amp; Scaling</title>
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="deck.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body>
+
+<!-- Arrowheads shared by every diagram -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="reveal"><div class="slides">
+
+<!-- ============ Title ============ -->
+<section class="title">
+  <div class="kicker">Module 2 · Lesson 14</div>
+  <h1>Data, jobs<br>&amp; scaling</h1>
+  <p class="sub">Keep data when Pods move, run work on a clock, and grow with the traffic</p>
+  <aside class="notes">
+    Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
+    Check first: kubectl get storageclass should show one marked (default).
+  </aside>
+</section>
+
+<section>
+  <h2>Pods come and go</h2>
+  <p class="lead">Kubernetes deletes and recreates Pods all the time, on any node.</p>
+  <ul class="lead">
+    <li class="fragment">A database that forgets every order → <b>storage</b></li>
+    <li class="fragment">A backup at 2 a.m. → <b>CronJob</b></li>
+    <li class="fragment">Placement results: 10× traffic → <b>autoscaling</b></li>
+  </ul>
+  <p class="take">Fine for a stateless API. A disaster for a database.</p>
+</section>
+
+<!-- ============ 01 Storage ============ -->
+<section class="divider">
+  <div class="num">01</div>
+  <h2>Storage</h2>
+  <p>Data that outlives the Pod</p>
+</section>
+
+<section>
+  <h2>emptyDir vs PersistentVolumeClaim</h2>
+  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Left: an emptyDir folder inside a Pod is deleted with the Pod. Right: a PVC disk sits outside the Pod; when the Pod is deleted, a new Pod uses the same disk">
+    <text class="b" x="20" y="34">emptyDir</text>
+    <rect class="pod" x="20" y="60" width="480" height="200" rx="14"/>
+    <text class="b" x="45" y="105">Pod</text>
+    <rect class="box" x="45" y="130" width="300" height="90" rx="10"/>
+    <text class="m" x="70" y="183">scratch folder</text>
+    <g class="fragment" data-fragment-index="0">
+      <path class="cross" d="M60,80 L460,240 M460,80 L60,240"/>
+      <text class="b badt" x="20" y="310">folder deleted too</text>
+    </g>
+
+    <text class="b" x="640" y="34">PersistentVolumeClaim</text>
+    <g class="fragment semi-fade-out" data-fragment-index="0">
+      <rect class="pod" x="640" y="60" width="240" height="120" rx="14"/>
+      <text class="b" x="665" y="130">old Pod</text>
+    </g>
+    <g class="fragment" data-fragment-index="0">
+      <path class="cross" d="M660,75 L860,165 M860,75 L660,165"/>
+    </g>
+    <g class="fragment" data-fragment-index="1">
+      <rect class="pod" x="910" y="60" width="240" height="120" rx="14" style="stroke:var(--accent);stroke-width:5"/>
+      <text class="b acc" x="935" y="130">new Pod</text>
+      <path class="arrow acc" d="M1030,182 L960,276"/>
+    </g>
+    <path class="arrow" d="M760,182 L840,276"/>
+    <rect class="svc" x="700" y="280" width="390" height="110" rx="14"/>
+    <text class="b" x="725" y="325">disk</text>
+    <text class="s" x="725" y="360">lives on after the Pod</text>
+  </svg>
+  <p class="take">emptyDir: a train berth. A PVC: your hostel room. Books still there after the holidays.</p>
+  <aside class="notes">
+    Sleeper berth: get off and whatever you left is gone. Hostel room: you go home (Pod deleted) and your books are there when you come back.
+  </aside>
+</section>
+
+<section>
+  <h2>Who makes the disk?</h2>
+  <svg class="d" viewBox="0 0 1170 300" role="img" aria-label="A PVC asks for 1 GiB; the StorageClass creates a PersistentVolume, a real disk, and binds it to the claim">
+    <rect class="svc" x="10" y="80" width="320" height="130" rx="12"/>
+    <text class="b" x="35" y="125">PVC</text>
+    <text class="s" x="35" y="160">“I need 1 GiB”</text>
+    <text class="s" x="35" y="188">you write this</text>
+    <g class="fragment">
+      <path class="arrow" d="M332,145 L420,145"/>
+      <rect class="cp" x="430" y="80" width="320" height="130" rx="12"/>
+      <text class="b" x="455" y="125">StorageClass</text>
+      <text class="s" x="455" y="160">makes the disk</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M752,145 L830,145"/>
+      <rect class="pod" x="840" y="80" width="320" height="130" rx="12"/>
+      <text class="b" x="865" y="125">PersistentVolume</text>
+      <text class="s" x="865" y="160">laptop: a folder on a node</text>
+      <text class="s" x="865" y="188">AWS: an EBS disk</text>
+    </g>
+  </svg>
+  <p class="lead fragment"><code>ReadWriteOnce</code>: only one node can mount it at a time.</p>
+  <aside class="notes">Same YAML on a laptop and on AWS; the StorageClass decides what disk you get.</aside>
+</section>
+
+<section>
+  <div class="kicker">Try it · wrong way</div>
+  <h2>PostgreSQL on emptyDir</h2>
+<pre class="term"><span class="cm"># create table orders, insert (1, 'masala dosa')</span>
+<span class="cmd">kubectl delete pod -l app=db</span>
+<span class="cmd">kubectl exec deploy/db -- psql -U postgres -c "SELECT * FROM orders;"</span>
+<span class="bad">ERROR:  relation "orders" does not exist</span></pre>
+  <p class="take">The new Pod got a brand new, empty emptyDir. Every order is gone.</p>
+  <aside class="notes">
+    db.yaml: postgres:17.6, password from db-secret.local.yaml (lesson 12 pattern), PGDATA set to a sub-folder, replicas 1, strategy Recreate.
+    Ask first: will the order survive a Pod delete?
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it · right way</div>
+  <h2>A PersistentVolumeClaim</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="6-7|8-10" data-fragment-index="0">
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>One node at a time</h3>
+        <p>What a normal cloud disk allows.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="0">
+        <h3>How big</h3>
+        <p>1 GiB. The StorageClass makes it.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Goes at the top of db.yaml, followed by a --- line.</aside>
+</section>
+
+<section>
+  <h2>Use the claim in the Pod</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="3-5|6-9|4,7" data-fragment-index="0">
+containers:
+  - name: postgres
+    volumeMounts:
+      - name: data
+        mountPath: /var/lib/postgresql/data
+volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: db-data
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Where</h3>
+        <p>Mount it where PostgreSQL keeps its files.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>What</h3>
+        <p>Was <code>emptyDir</code>. Now the claim <code>db-data</code>.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>The names match</h3>
+        <p>The mount finds its volume by <code>name</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>The order survives</h2>
+<pre class="term"><span class="cmd">kubectl get pvc</span>
+<span class="out">NAME      STATUS   CAPACITY   ACCESS MODES</span>
+<span class="out">db-data   <span class="ok">Bound</span>    1Gi        RWO</span>
+<span class="cmd">kubectl delete pod -l app=db</span>
+<span class="cmd">kubectl exec deploy/db -- psql -U postgres -c "SELECT * FROM orders;"</span>
+<span class="out"> id |    item</span>
+<span class="out">  1 | <span class="ok">masala dosa</span></span></pre>
+  <p class="take">On a laptop the new Pod lands on the same node. On AWS the disk moves to the new node.</p>
+  <aside class="notes">Run kubectl get pod -l app=db -o wide before and after the delete.</aside>
+</section>
+
+<section>
+  <h2>Why 1 replica and Recreate?</h2>
+  <ul class="lead">
+    <li>Two PostgreSQL servers on one data folder <b>corrupt</b> it</li>
+    <li class="fragment"><code>ReadWriteOnce</code>: one node only</li>
+    <li class="fragment">Rolling update: new Pod starts while the old one holds the disk</li>
+    <li class="fragment"><b>Recreate</b> stops the old Pod first</li>
+  </ul>
+  <p class="take">More copies? A StatefulSet with replication, or a managed database like Amazon RDS.</p>
+</section>
+
+<section>
+  <h2>Before you delete a PVC</h2>
+<pre class="term big"><span class="cmd">kubectl get pv</span>
+<span class="out">NAME          CAPACITY   RECLAIM POLICY   STATUS</span>
+<span class="out">pvc-3f9a…     1Gi        <span class="hi">Delete</span>           Bound</span></pre>
+  <table>
+    <tr><td><code>Delete</code></td><td>Deleting the PVC deletes the disk and the data</td></tr>
+    <tr class="fragment"><td><code>Retain</code></td><td>The disk stays, for manual recovery</td></tr>
+  </table>
+  <aside class="notes">Clean up later: kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml.</aside>
+</section>
+
+<!-- ============ 02 Jobs ============ -->
+<section class="divider">
+  <div class="num">02</div>
+  <h2>Jobs</h2>
+  <p>Work that finishes, and work on a clock</p>
+</section>
+
+<section>
+  <h2>Forever, once, or on a schedule</h2>
+  <table>
+    <tr><th>Object</th><th>Runs a Pod…</th></tr>
+    <tr><td><b>Deployment</b></td><td>forever</td></tr>
+    <tr class="fragment"><td><b>Job</b></td><td>until it <em>finishes</em> successfully</td></tr>
+    <tr class="fragment"><td><b>CronJob</b></td><td>by creating a Job on a schedule</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>The schedule</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="Cron schedule 0 2 * * * has five fields: minute 0, hour 2, day of month any, month any, day of week any; it means 02:00 every day">
+    <text class="huge" x="60" y="120" style="font-size:110px">0</text>
+    <text class="huge" x="290" y="120" style="font-size:110px">2</text>
+    <text class="huge" x="520" y="120" style="font-size:110px">*</text>
+    <text class="huge" x="750" y="120" style="font-size:110px">*</text>
+    <text class="huge" x="980" y="120" style="font-size:110px">*</text>
+    <g class="fragment">
+      <text class="b" x="40" y="185" style="font-size:28px">minute</text>
+      <text class="b" x="280" y="185" style="font-size:28px">hour</text>
+      <text class="b" x="520" y="185" style="font-size:28px">day</text>
+      <text class="b" x="730" y="185" style="font-size:28px">month</text>
+      <text class="b" x="945" y="185" style="font-size:28px">weekday</text>
+    </g>
+    <text class="b fragment" x="40" y="285" style="font-size:44px">= 02:00 every day</text>
+    <text class="m fragment" x="40" y="370" style="font-size:32px">30 23 * * *  → 23:30 every day</text>
+  </svg>
+  <p class="take">Same format as Linux <code>cron</code>. <code>*</code> means “every”.</p>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>A backup CronJob</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-3|4|7|10|4,7,10" data-fragment-index="0">
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Asia/Kolkata"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: busybox:1.36
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>When</h3>
+        <p>02:00 every day, India time. Without <code>timeZone</code>, it's the cluster's clock.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>Overlap</h3>
+        <p>Last run still going? Skip the new one.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="1">
+        <h3>Retries</h3>
+        <p>2 retries, then the Job is <b>Failed</b>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="2">
+        <h3>On failure</h3>
+        <p>Retry in the same Pod. <code>Never</code> = a new Pod each time.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="3">
+        <h3>Three settings</h3>
+        <p><code>concurrencyPolicy</code><br><code>backoffLimit</code><br><code>restartPolicy</code></p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    Top of the file: apiVersion: batch/v1, kind: CronJob, metadata name: backup.
+    For the demo the lesson uses schedule "* * * * *" and a command that sleeps 90 s, so runs would overlap.
+    kubectl get jobs -w for three minutes: never two running together.
+  </aside>
+</section>
+
+<section>
+  <h2>When the last run is still going</h2>
+  <table>
+    <tr><th><code>concurrencyPolicy</code></th><th>The new run…</th></tr>
+    <tr><td><code>Allow</code> <span class="muted">(default)</span></td><td>starts anyway: two backups fight over the same files</td></tr>
+    <tr class="fragment"><td><code>Forbid</code></td><td>is <b>skipped</b></td></tr>
+    <tr class="fragment"><td><code>Replace</code></td><td>kills the old run and starts</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="kicker">Break it</div>
+  <h2>A backup that keeps failing</h2>
+  <svg class="d" viewBox="0 0 1170 260" role="img" aria-label="With restartPolicy Never and backoffLimit 2: the first try and two retries each make a failed Pod, then the Job is marked Failed">
+    <rect class="bad" x="10" y="40" width="220" height="100" rx="12"/>
+    <text class="b" x="35" y="85">try 1</text>
+    <text class="m badt" x="35" y="120">exit 1</text>
+    <g class="fragment">
+      <rect class="bad" x="260" y="40" width="220" height="100" rx="12"/>
+      <text class="b" x="285" y="85">retry 1</text>
+      <text class="m badt" x="285" y="120">exit 1</text>
+      <rect class="bad" x="510" y="40" width="220" height="100" rx="12"/>
+      <text class="b" x="535" y="85">retry 2</text>
+      <text class="m badt" x="535" y="120">exit 1</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M732,90 L810,90"/>
+      <rect class="bad" x="820" y="30" width="340" height="120" rx="12" style="stroke-width:5"/>
+      <text class="b badt" x="845" y="80">Job Failed</text>
+      <text class="m" x="845" y="120">BackoffLimitExceeded</text>
+      <text class="s" x="10" y="210">restartPolicy: Never → a new Pod each time, so you can read every failed run's logs</text>
+    </g>
+  </svg>
+  <p class="take">At work, you alert on BackoffLimitExceeded.</p>
+  <aside class="notes">
+    Change the command to echo disk full; exit 1 and restartPolicy to Never. kubectl describe job shows BackoffLimitExceeded.
+  </aside>
+</section>
+
+<!-- ============ 03 Autoscaling ============ -->
+<section class="divider">
+  <div class="num">03</div>
+  <h2>Autoscaling</h2>
+  <p>More Pods when the queue grows</p>
+</section>
+
+<section>
+  <h2>The HorizontalPodAutoscaler</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="Loop: metrics-server reads each Pod's CPU; the HPA compares the average with its target; it changes the Deployment's replicas; the Pods change; repeat">
+    <rect class="pod" x="20" y="40" width="300" height="110" rx="12"/>
+    <text class="b" x="45" y="85">Pods</text>
+    <text class="s" x="45" y="120">using CPU</text>
+    <g class="fragment">
+      <path class="arrow" d="M322,95 L436,95"/>
+      <rect class="box" x="440" y="40" width="300" height="110" rx="12"/>
+      <text class="b" x="465" y="85">metrics-server</text>
+      <text class="s" x="465" y="120">reads CPU per Pod</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M742,95 L846,95"/>
+      <rect class="cp" x="850" y="40" width="300" height="110" rx="12"/>
+      <text class="b" x="875" y="85">HPA</text>
+      <text class="s" x="875" y="120">average vs target 50%</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M1000,152 L1000,236"/>
+      <rect class="svc" x="700" y="240" width="450" height="110" rx="12"/>
+      <text class="b" x="725" y="285">Deployment</text>
+      <text class="m acc" x="725" y="322">replicas: 1 → 4</text>
+      <path class="arrow acc" d="M698,295 C300,295 170,250 170,154"/>
+    </g>
+  </svg>
+  <p class="take">Like the canteen manager who opens a second counter when the queue gets long.</p>
+  <aside class="notes">The HPA checks about every 15 s. It closes the counter after lunch too: scale-down.</aside>
+</section>
+
+<section>
+  <h2>Percent of what?</h2>
+  <p class="lead">CPU <b>request</b>: <code>200m</code> = a fifth of one CPU</p>
+  <p class="lead fragment">Target <code>50%</code> → aim for <b>100m</b> per Pod</p>
+  <div class="card bad fragment" style="margin-top:30px">
+    <p class="lead" style="margin:0">No request → nothing to divide by → the HPA can't measure.</p>
+  </div>
+  <aside class="notes">m = millicores. 1000m = one CPU.</aside>
+</section>
+
+<section>
+  <h2>How many Pods?</h2>
+  <p class="lead">wanted = current replicas × current CPU ÷ target</p>
+  <p class="huge fragment">4 × 90 ÷ 60 = 6</p>
+  <p class="lead fragment">Rounded up, kept between <code>minReplicas</code> and <code>maxReplicas</code>.</p>
+  <p class="take">By default, scale-down waits 5 minutes of low CPU, so a short dip doesn't flap.</p>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>The HPA spec</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-5|6-7|8-14" data-fragment-index="0">
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>What to scale</h3>
+        <p>The <code>php-apache</code> Deployment.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>Limits</h3>
+        <p>Between 1 and 6 Pods.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>Target</h3>
+        <p>Average CPU at 50% of the request.</p>
+        <p>The Deployment leaves out <code>replicas</code>: the HPA owns it.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    Top of the object: apiVersion: autoscaling/v2, kind: HorizontalPodAutoscaler, name: php-apache.
+    hpa.yaml also has the Deployment (requests cpu 200m, limits 500m) and a Service. Image registry.k8s.io/hpa-example from the Kubernetes docs.
+    Needs metrics-server: kubectl top nodes should print numbers.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Create a rush</h2>
+<pre class="term"><span class="cm"># second terminal: a load generator calling http://php-apache</span>
+<span class="cmd">kubectl get hpa php-apache -w</span>
+<span class="out">NAME         TARGETS          MINPODS   MAXPODS   REPLICAS</span>
+<span class="out">php-apache   cpu: 0%/50%      1         6         1</span>
+<span class="out">php-apache   cpu: <span class="bad">250%</span>/50%    1         6         1</span>
+<span class="out">php-apache   cpu: 120%/50%    1         6         <span class="hi">4</span></span>
+<span class="out">php-apache   cpu: 52%/50%     1         6         <span class="hi">5</span></span></pre>
+  <p class="take">Stop the load: replicas come down only after about 5 minutes.</p>
+  <aside class="notes">
+    Load: kubectl run load --rm -it --image=busybox:1.36 --restart=Never -- sh -c "while sleep 0.01; do wget -qO- http://php-apache; done"
+    Ask first: how many replicas will you get? Numbers vary.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Break it</div>
+  <h2>Remove the CPU request</h2>
+<pre class="term big"><span class="cmd">kubectl get hpa php-apache</span>
+<span class="out">TARGETS</span>
+<span class="out">cpu: <span class="bad">&lt;unknown&gt;</span>/50%</span>
+<span class="cmd">kubectl describe hpa php-apache</span>
+<span class="bad">… missing request for cpu</span></pre>
+  <p class="take">No request, no 100% to measure against. The HPA does nothing.</p>
+  <aside class="notes">Delete the resources: block (three lines) and apply. Clean up: kubectl delete -f hpa.yaml.</aside>
+</section>
+
+<section>
+  <h2>What limits how fast you scale?</h2>
+  <ul class="lead">
+    <li>Checks every 15 s; metrics are a little behind</li>
+    <li class="fragment">Each new Pod: schedule, pull image, start, pass readiness</li>
+    <li class="fragment">Full nodes → <code>Pending</code> until a cluster autoscaler adds nodes (minutes)</li>
+  </ul>
+  <p class="take">For a known sale or results day, raise minReplicas before it starts.</p>
+</section>
+
+<!-- ============ Check ============ -->
+<section class="divider">
+  <div class="num">?</div>
+  <h2>Check yourself</h2>
+  <p>Answer first, then click</p>
+</section>
+
+<section>
+  <div class="kicker">Check 1</div>
+  <p class="q">A Pod with an <code>emptyDir</code> volume is deleted. The Deployment makes a new one. What's in the new Pod's volume?</p>
+  <div class="a fragment">Nothing. It's a fresh, empty folder. An emptyDir lives and dies with its Pod.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 2</div>
+  <p class="q">A daily backup sometimes runs over 24 hours. Never two at once, and never kill one half-way. Which setting?</p>
+  <div class="a fragment"><code>concurrencyPolicy: Forbid</code>: the new run is skipped while the old one is still going.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 3</div>
+  <p class="q">An HPA shows <code>cpu: &lt;unknown&gt;/70%</code> and never scales. metrics-server works. Most likely cause?</p>
+  <div class="a fragment">The Pods have no CPU request, so there's nothing to measure the percentage against.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 4</div>
+  <p class="q">An HPA targets 60% CPU. 4 replicas average 90%. About how many replicas will it ask for?</p>
+  <div class="a fragment">4 × 90 ÷ 60 = <b>6</b>.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 5</div>
+  <p class="q">Why run PostgreSQL with a PVC, 1 replica and Recreate, not emptyDir and 3 replicas?</p>
+  <div class="a fragment">emptyDir dies with the Pod; the PVC's disk lives on. Two servers on one data folder corrupt it, and ReadWriteOnce mounts on one node. Recreate stops the old Pod before the new one takes the disk.</div>
+</section>
+
+<section class="title">
+  <div class="kicker">Read next</div>
+  <h2>Do it yourself</h2>
+  <ul>
+    <li><a href="../lessons/0014-data-jobs-scaling.html">Lesson 14: Data, jobs &amp; scaling</a></li>
+    <li><a href="0015-traffic-namespaces-debugging.html">Next deck: Traffic, namespaces &amp; debugging</a></li>
+  </ul>
+</section>
+
+</div></div>
+
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="vendor/reveal/plugin/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    center: false,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealNotes, RevealHighlight],
+    keyboard: {
+      // T cycles the course theme: system → light → dark
+      84: function () {
+        var btn = document.querySelector('.theme-toggle');
+        if (btn) btn.click();
+      }
+    }
+  });
+</script>
+</body>
+</html>

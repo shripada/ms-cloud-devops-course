@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Traffic, Namespaces &amp; Debugging</title>
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="deck.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body>
+
+<!-- Arrowheads shared by every diagram -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="reveal"><div class="slides">
+
+<!-- ============ Title ============ -->
+<section class="title">
+  <div class="kicker">Module 2 · Lesson 15</div>
+  <h1>Traffic, namespaces<br>&amp; debugging</h1>
+  <p class="sub">One front door for many Services, a cluster shared by teams, and finding out why a Pod is broken</p>
+  <aside class="notes">
+    Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
+    Envoy Gateway needs about 1 GB of free memory. Pinned to v1.9.2.
+  </aside>
+</section>
+
+<section>
+  <h2>Three problems at work</h2>
+  <ul class="lead">
+    <li>Frontend, API and more, behind <b>one</b> website address</li>
+    <li class="fragment">Dev, testing and other teams share <b>one</b> cluster</li>
+    <li class="fragment">Every week something is <code>Pending</code> or <code>CrashLoopBackOff</code></li>
+  </ul>
+  <p class="take fragment">The person who finds out why in two minutes is the one the team calls.</p>
+</section>
+
+<!-- ============ 01 Gateway API ============ -->
+<section class="divider">
+  <div class="num">01</div>
+  <h2>Gateway API</h2>
+  <p>One entry point, many Services</p>
+</section>
+
+<section>
+  <h2>One load balancer per Service?</h2>
+  <div class="cols">
+    <div class="card bad">
+      <h3>Each Service a LoadBalancer</h3>
+      <p>3 Services → 3 load balancers</p>
+      <p class="muted" style="margin:0">3 addresses, 3 bills, 3 certificates</p>
+    </div>
+    <div class="card good fragment">
+      <h3>One Gateway</h3>
+      <p>1 entry point → routes to many ClusterIP Services</p>
+      <p class="muted" style="margin:0">by hostname and path</p>
+    </div>
+  </div>
+  <p class="take">Only the gateway is exposed. The app Services stay internal.</p>
+</section>
+
+<section>
+  <h2>Three objects</h2>
+  <table>
+    <tr><th>Object</th><th>Says</th></tr>
+    <tr><td><code>GatewayClass</code></td><td>Which implementation runs the gate</td></tr>
+    <tr class="fragment"><td><code>Gateway</code></td><td>Listeners, e.g. HTTP on port 80</td></tr>
+    <tr class="fragment"><td><code>HTTPRoute</code></td><td>Host + path → which Service</td></tr>
+  </table>
+  <p class="take">An apartment's main gate: the security company, the gate, and the visitor register.</p>
+  <aside class="notes">
+    GatewayClass = the security company named in the contract. Gateway = the gate. HTTPRoute = the register: "visitors for flat 4B, go to Tower A".
+    Envoy Proxy is the guard who handles each visitor. The older Ingress API is frozen but not removed; Kubernetes recommends Gateway API for new work.
+  </aside>
+</section>
+
+<section>
+  <h2>The objects are only configuration</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="The Envoy Gateway controller watches GatewayClass, Gateway and HTTPRoute objects and configures Envoy Proxy Pods; Envoy Proxy handles the live requests and sends them to the Services">
+    <rect class="box" x="10" y="30" width="300" height="80" rx="10"/>
+    <text class="m" x="35" y="80">GatewayClass</text>
+    <rect class="box" x="10" y="130" width="300" height="80" rx="10"/>
+    <text class="m" x="35" y="180">Gateway</text>
+    <rect class="box" x="10" y="230" width="300" height="80" rx="10"/>
+    <text class="m" x="35" y="280">HTTPRoute</text>
+    <g class="fragment">
+      <path class="arrow" d="M440,170 L314,170"/>
+      <text class="s" x="335" y="150">watches</text>
+      <rect class="cp" x="445" y="110" width="330" height="120" rx="12"/>
+      <text class="b" x="470" y="155">Envoy Gateway</text>
+      <text class="s" x="470" y="190">controller</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M610,232 L610,286"/>
+      <text class="s" x="625" y="268">configures</text>
+      <rect class="pod" x="445" y="290" width="330" height="100" rx="12"/>
+      <text class="b" x="470" y="333">Envoy Proxy Pods</text>
+      <text class="s" x="470" y="366">handle each request</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow acc" d="M777,320 L896,250"/>
+      <path class="arrow acc" d="M777,360 L896,340"/>
+      <rect class="svc" x="900" y="200" width="250" height="80" rx="10"/>
+      <text class="m" x="925" y="250">web</text>
+      <rect class="svc" x="900" y="300" width="250" height="80" rx="10"/>
+      <text class="m" x="925" y="350">api</text>
+    </g>
+  </svg>
+  <p class="take">No controller → nothing happens.</p>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Install Envoy Gateway</h2>
+<pre class="term"><span class="cmd">kubectl apply --server-side -f \</span>
+<span class="out">  https://github.com/envoyproxy/gateway/releases/download/v1.9.2/install.yaml</span>
+<span class="cmd">kubectl wait --timeout=5m -n envoy-gateway-system \</span>
+<span class="out">  deployment/envoy-gateway --for=condition=Available</span>
+<span class="out">deployment.apps/envoy-gateway <span class="ok">condition met</span></span></pre>
+  <p class="take">This installs the Gateway API object types and the controller.</p>
+  <aside class="notes">kubectl get crd gateways.gateway.networking.k8s.io confirms the new object type exists.</aside>
+</section>
+
+<section>
+  <h2>The Gateway</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="1-4|6|7-10|11-13" data-fragment-index="0">
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shop
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>A Gateway</h3>
+        <p>Named <code>shop</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>Who runs it</h3>
+        <p>GatewayClass <code>eg</code> = Envoy Gateway.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="1">
+        <h3>Listen</h3>
+        <p>HTTP on port 80.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="2">
+        <h3>Who may attach</h3>
+        <p>Routes in the same namespace.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    The GatewayClass eg in shop.yaml has controllerName: gateway.envoyproxy.io/gatewayclass-controller.
+    At work a platform team owns the GatewayClass and shared Gateway; app teams own their Deployments, Services and HTTPRoutes.
+  </aside>
+</section>
+
+<section>
+  <h2>The HTTPRoute: where and for whom</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="1-4|6-7|8-9" data-fragment-index="0">
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop
+spec:
+  parentRefs:
+    - name: shop
+  hostnames:
+    - shop.local
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>An HTTPRoute</h3>
+        <p>Also named <code>shop</code>.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>Attach to</h3>
+        <p>The Gateway <code>shop</code>.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>Only for</h3>
+        <p>Requests with <code>Host: shop.local</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>The HTTPRoute: rules</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-5|6-8|9-15" data-fragment-index="0">
+rules:
+  - matches:
+      - path:
+          type: PathPrefix
+          value: /api
+    backendRefs:
+      - name: api
+        port: 80
+  - matches:
+      - path:
+          type: PathPrefix
+          value: /
+    backendRefs:
+      - name: web
+        port: 80
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Match</h3>
+        <p>Path is <code>/api</code> or under it…</p>
+        <p class="muted"><code>/api/orders</code> ✓ &nbsp; <code>/apiary</code> ✗</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>…send to</h3>
+        <p>the <code>api</code> Service, port 80.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>Everything else</h3>
+        <p>goes to <code>web</code>.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    web and api are ordinary Deployments of traefik/whoami:v1.11 with ClusterIP Services, all in shop.yaml.
+  </aside>
+</section>
+
+<section>
+  <h2>Follow three requests</h2>
+  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Request for shop.local slash goes through Envoy to the web Service; shop.local slash api slash orders goes to the api Service; other.local gets 404">
+    <rect class="pod" x="450" y="150" width="260" height="120" rx="14"/>
+    <text class="b" x="475" y="200">Envoy</text>
+    <text class="s" x="475" y="235">the one entry point</text>
+    <rect class="svc" x="900" y="40" width="250" height="90" rx="12"/>
+    <text class="m" x="925" y="95">web</text>
+    <rect class="svc" x="900" y="290" width="250" height="90" rx="12"/>
+    <text class="m" x="925" y="345">api</text>
+    <g class="fragment">
+      <text class="m" x="10" y="70">shop.local /</text>
+      <path class="arrow" d="M200,80 L446,170"/>
+      <path class="arrow acc" d="M712,180 L896,90"/>
+    </g>
+    <g class="fragment">
+      <text class="m" x="10" y="220">shop.local /api/orders</text>
+      <path class="arrow" d="M330,230 L446,215"/>
+      <path class="arrow acc" d="M712,240 L896,330"/>
+    </g>
+    <g class="fragment">
+      <text class="m" x="10" y="370">other.local /</text>
+      <path class="arrow" d="M200,360 L446,260"/>
+      <text class="b badt" x="460" y="320">404: no route</text>
+    </g>
+  </svg>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Send requests with a Host header</h2>
+<pre class="term"><span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname</span>
+<span class="out">Hostname: <span class="hi">web</span>-6b7f9c4d8-x2k4q</span>
+<span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname</span>
+<span class="out">Hostname: <span class="hi">api</span>-58c9d4b7f-r2mzt</span>
+<span class="cmd">curl -s -H "Host: other.local" http://localhost:8080/ | head -3</span>
+<span class="bad">404</span></pre>
+  <aside class="notes">
+    localhost:8080 comes from port-forwarding Envoy's generated Service in envoy-gateway-system (see lesson step 4).
+    On minikube, minikube tunnel; on a cloud, the address in kubectl get gateway shop.
+    Check status first: kubectl get gatewayclass,gateway,httproute. Gateway should be Accepted and Programmed.
+  </aside>
+</section>
+
+<section>
+  <h2>PathPrefix or Exact?</h2>
+  <table>
+    <tr><th>Rule</th><th><code>/api</code></th><th><code>/api/orders/42</code></th></tr>
+    <tr><td><code>PathPrefix /api</code></td><td class="ok">✓</td><td class="ok">✓</td></tr>
+    <tr class="fragment"><td><code>Exact /api</code></td><td class="ok">✓</td><td class="bad">✗ falls to the <code>/</code> rule</td></tr>
+  </table>
+  <p class="take">Use PathPrefix for a whole section of the site.</p>
+  <aside class="notes">
+    Break it 1: change the / rule to Exact; only / works, /about doesn't.
+    Break it 2: set parentRefs to missing; kubectl describe httproute shop no longer shows an accepted parent.
+  </aside>
+</section>
+
+<!-- ============ 02 Sharing ============ -->
+<section class="divider">
+  <div class="num">02</div>
+  <h2>Sharing a cluster</h2>
+  <p>Namespaces, labels and quotas</p>
+</section>
+
+<section>
+  <h2>Three tools</h2>
+  <table>
+    <tr><th>Tool</th><th>Is</th></tr>
+    <tr><td><b>Namespace</b></td><td>A folder for objects. Names unique inside it</td></tr>
+    <tr class="fragment"><td><b>Label</b></td><td>A tag like <code>app=front</code>. Filter with <code>-l</code></td></tr>
+    <tr class="fragment"><td><b>ResourceQuota</b></td><td>A cap on one namespace's total CPU, memory, Pods</td></tr>
+  </table>
+  <p class="take">Each tower gets its own name boards, and at most 3 parking spots.</p>
+  <aside class="notes">Same apartment building: each tower is a namespace; the parking limit is a ResourceQuota.</aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>A quota for the testing team</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="5|7-10" data-fragment-index="0">
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: testing
+spec:
+  hard:
+    pods: "3"
+    requests.cpu: "1"
+    requests.memory: 1Gi
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>For one namespace</h3>
+        <p><code>testing</code>, created in the same file.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="0">
+        <h3>The caps</h3>
+        <p>3 Pods, 1 CPU and 1 GiB of requests, in total.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">testing.yaml starts with a Namespace object named testing, then ---, then this quota.</aside>
+</section>
+
+<section>
+  <div class="kicker">Predict</div>
+  <p class="q">The testing team adds a Deployment with 5 replicas and no resource requests. How many Pods start?</p>
+  <div class="a fragment"><b>Zero.</b> Once a namespace has a CPU or memory quota, every Pod must say what it requests.</div>
+<pre class="term wrap fragment" style="margin-top:24px"><span class="cmd">kubectl get events -n testing</span>
+<span class="bad">failed quota: team-quota: must specify requests.cpu…</span></pre>
+</section>
+
+<section>
+  <h2>Add requests: 3 of 5</h2>
+  <svg class="d" viewBox="0 0 1170 300" role="img" aria-label="The Deployment wants 5 Pods; 3 run, filling the quota; Pods 4 and 5 are refused by the API server">
+    <rect class="pod" x="10" y="60" width="200" height="110" rx="12"/><text class="m" x="35" y="125">Pod 1</text>
+    <rect class="pod" x="240" y="60" width="200" height="110" rx="12"/><text class="m" x="265" y="125">Pod 2</text>
+    <rect class="pod" x="470" y="60" width="200" height="110" rx="12"/><text class="m" x="495" y="125">Pod 3</text>
+    <g class="fragment">
+      <rect class="frame" x="720" y="60" width="200" height="110" rx="12"/><text class="m" x="745" y="125">Pod 4</text>
+      <rect class="frame" x="950" y="60" width="200" height="110" rx="12"/><text class="m" x="975" y="125">Pod 5</text>
+      <path class="cross" d="M740,75 L900,155 M900,75 L740,155"/>
+      <path class="cross" d="M970,75 L1130,155 M1130,75 L970,155"/>
+      <text class="b badt" x="720" y="220">exceeded quota</text>
+    </g>
+    <text class="m acc" x="10" y="220">pods 3/3</text>
+  </svg>
+  <p class="take">Refused Pods are never created, so they aren't Pending. Nothing in default is touched.</p>
+  <aside class="notes">
+    Requests added: cpu 100m, memory 64Mi. kubectl describe quota -n testing shows pods 3/3.
+    The Deployment still wants 5; the ReplicaSet keeps trying; the API server keeps refusing.
+  </aside>
+</section>
+
+<section>
+  <h2>Reaching a Service in another namespace</h2>
+  <svg class="d" viewBox="0 0 1170 300" role="img" aria-label="The full DNS name front.testing.svc.cluster.local is the Service name, then the namespace, then a fixed suffix">
+    <text class="huge" x="20" y="100" style="font-size:54px">front<tspan style="fill:var(--fg)">.</tspan>testing<tspan style="fill:var(--muted)">.svc.cluster.local</tspan></text>
+    <g class="fragment">
+      <text class="b" x="30" y="160" style="font-size:28px">Service</text>
+      <text class="b" x="225" y="160" style="font-size:28px">namespace</text>
+      <text class="b" x="560" y="160" style="font-size:28px;fill:var(--muted)">always the same</text>
+    </g>
+    <text class="b fragment" x="20" y="260" style="font-size:36px">Same namespace? Just <tspan style="font-family:'JetBrains Mono',monospace;fill:var(--accent)">front</tspan></text>
+  </svg>
+  <p class="take">Namespaces don't block traffic between teams. That needs a NetworkPolicy.</p>
+  <aside class="notes">
+    kubectl get pods -A -l app=front looks in all namespaces.
+    Test: kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- wget -qO- http://front.testing.svc.cluster.local
+    Clean up: kubectl delete -f testing.yaml removes the namespace and everything in it.
+  </aside>
+</section>
+
+<section>
+  <h2>kubeconfig and contexts</h2>
+  <svg class="d" viewBox="0 0 1170 330" role="img" aria-label="A context in ~/.kube/config combines a cluster, a user and a default namespace; kubectl uses the current context">
+    <rect class="frame" x="10" y="10" width="1150" height="300" rx="14"/>
+    <text class="m" x="35" y="50">~/.kube/config</text>
+    <rect class="box" x="35" y="80" width="250" height="90" rx="10"/><text class="b" x="60" y="135">cluster</text>
+    <text class="b big" x="300" y="135">+</text>
+    <rect class="box" x="330" y="80" width="250" height="90" rx="10"/><text class="b" x="355" y="135">user</text>
+    <text class="b big" x="595" y="135">+</text>
+    <rect class="box" x="625" y="80" width="250" height="90" rx="10"/><text class="b" x="650" y="135">namespace</text>
+    <text class="b big" x="890" y="135">=</text>
+    <rect class="svc" x="920" y="80" width="220" height="90" rx="10"/><text class="b" x="945" y="135">context</text>
+    <g class="fragment">
+      <text class="m" x="35" y="232" style="font-size:26px">* docker-desktop</text>
+      <text class="s" x="35" y="272" style="font-size:24px">current</text>
+      <text class="m" x="520" y="232" style="font-size:26px">shop-prod</text>
+      <text class="s" x="520" y="272" style="font-size:24px">added by aws eks update-kubeconfig</text>
+    </g>
+  </svg>
+  <p class="take">Check the current context before any delete.</p>
+  <aside class="notes">
+    kubectl config get-contexts, kubectl config current-context, kubectl config use-context &lt;name&gt;, kubectl --context &lt;name&gt; get pods.
+  </aside>
+</section>
+
+<section>
+  <h2>Three ways to get a cluster</h2>
+  <table>
+    <tr><th>Option</th><th>Good for</th></tr>
+    <tr><td>kind / minikube / Docker Desktop</td><td>Your laptop: quick, throwaway practice</td></tr>
+    <tr class="fragment"><td>kubeadm on VMs</td><td>A college lab: you build and run every part</td></tr>
+    <tr class="fragment"><td>Managed: EKS, AKS, GKE</td><td>Production: the cloud runs the control plane</td></tr>
+  </table>
+  <aside class="notes">
+    kubeadm: you install and join each node, and you run upgrades, certificates and etcd backups yourself.
+    Managed: you still plan version upgrades and manage node pools and add-ons, and pay cloud charges.
+  </aside>
+</section>
+
+<!-- ============ 03 Debugging ============ -->
+<section class="divider">
+  <div class="num">03</div>
+  <h2>Debugging</h2>
+  <p>Read the status, run one command</p>
+</section>
+
+<section>
+  <h2>It never starts</h2>
+  <table>
+    <tr><th>You see</th><th>It means</th><th>Check with</th></tr>
+    <tr><td><code>Pending</code></td><td>Not on a node yet, or still being set up</td><td><code>describe pod</code></td></tr>
+    <tr class="fragment"><td><code>ImagePullBackOff</code></td><td>Node can't download the image</td><td><code>describe pod</code></td></tr>
+    <tr class="fragment"><td><code>CreateContainer­ConfigError</code></td><td>Missing ConfigMap, Secret or key</td><td><code>describe pod</code></td></tr>
+  </table>
+  <p class="take">Not started yet = no logs. Read the Events at the bottom of describe.</p>
+  <aside class="notes">
+    Pending causes: requests bigger than any node's free CPU/memory; taints; a PVC that can't be bound.
+    ImagePullBackOff causes: typo in name or tag; private registry without imagePullSecrets.
+  </aside>
+</section>
+
+<section>
+  <h2>It starts, but it's broken</h2>
+  <table>
+    <tr><th>You see</th><th>It means</th><th>Check with</th></tr>
+    <tr><td><code>CrashLoopBackOff</code></td><td>Starts, exits, again and again</td><td><code>logs --previous</code></td></tr>
+    <tr class="fragment"><td><code>OOMKilled</code></td><td>Used more memory than its limit</td><td><code>describe pod</code></td></tr>
+    <tr class="fragment"><td>Running, Service silent</td><td>Traffic can't reach the Pod</td><td><code>get endpointslices</code></td></tr>
+  </table>
+  <aside class="notes">
+    CrashLoopBackOff causes: app error, missing env var, can't reach the database, liveness probe too strict.
+    OOMKilled shows in describe under Last State. Service silent: selector vs labels, wrong targetPort, readiness failing.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Read a Pending message</h2>
+  <p>A Deployment that requests <code>64Gi</code> of memory:</p>
+<pre class="term big"><span class="out">0/3 nodes are available:</span>
+<span class="hi fragment" data-fragment-index="0">1 node(s) had untolerated taint</span>
+<span class="hi fragment" data-fragment-index="0">  {node-role.kubernetes.io/control-plane: },</span>
+<span class="hi fragment" data-fragment-index="1">2 Insufficient memory.</span></pre>
+  <ul class="lead">
+    <li class="fragment" data-fragment-index="0">1 → the control plane node keeps normal Pods off</li>
+    <li class="fragment" data-fragment-index="1">2 → neither worker has 64 GiB free</li>
+  </ul>
+  <aside class="notes">
+    kubectl create deployment big --image=traefik/whoami:v1.11; kubectl set resources deployment big --requests=memory=64Gi; kubectl describe pod -l app=big.
+    Fix: ask for a sensible amount, or add bigger nodes. kubectl delete deployment big.
+  </aside>
+</section>
+
+<section>
+  <h2>The 127.0.0.1 trap</h2>
+  <svg class="d" viewBox="0 0 1170 360" role="img" aria-label="Inside the API Pod, 127.0.0.1 is the Pod itself, so a connection to 127.0.0.1:5432 is refused; the database runs in another Pod reached through the Service name db">
+    <rect class="pod" x="20" y="80" width="400" height="200" rx="14"/>
+    <text class="b" x="45" y="125">API Pod</text>
+    <path class="arrow" d="M300,170 C390,170 390,250 300,250" style="stroke:var(--bad)"/>
+    <text class="m badt" x="45" y="215">127.0.0.1:5432</text>
+    <text class="s" x="45" y="255">= this Pod: nothing there</text>
+    <rect class="pod" x="760" y="80" width="390" height="200" rx="14"/>
+    <text class="b" x="785" y="125">database Pod</text>
+    <text class="m" x="785" y="165">listens on 5432</text>
+    <g class="fragment">
+      <path class="arrow acc" d="M422,140 L756,140"/>
+      <text class="m acc" x="480" y="125">db:5432</text>
+      <text class="s" x="480" y="190">via the Service name</text>
+    </g>
+  </svg>
+  <p class="take">It worked on the laptop because both ran on one machine. In the cluster, use the Service name.</p>
+  <aside class="notes">
+    Log line: connect ECONNREFUSED 127.0.0.1:5432. Set the database host through a ConfigMap: db, or db.shop.svc.cluster.local.
+  </aside>
+</section>
+
+<!-- ============ Check ============ -->
+<section class="divider">
+  <div class="num">?</div>
+  <h2>Check yourself</h2>
+  <p>Answer first, then click</p>
+</section>
+
+<section>
+  <div class="kicker">Check 1</div>
+  <p class="q">You apply a Gateway and an HTTPRoute in a fresh cluster. The Gateway never becomes Programmed. Most likely cause?</p>
+  <div class="a fragment">No Gateway controller is installed, or none matches the GatewayClass. The objects are only configuration.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 2</div>
+  <p class="q">A namespace's quota allows 20 Pods and 20 are running. Someone scales a Deployment up by 2. What happens?</p>
+  <div class="a fragment">The API server refuses the new Pods. They are never created; events show “exceeded quota”.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 3</div>
+  <p class="q">Both API Pods are Running and Ready, but the Service has no endpoints. What do you check first?</p>
+  <div class="a fragment">The Service's selector against the Pods' labels: <code>kubectl get pods --show-labels</code>.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 4</div>
+  <p class="q">A Pod is in <code>CrashLoopBackOff</code>. Which command most often shows why?</p>
+  <div class="a fragment"><code>kubectl logs &lt;pod&gt; --previous</code>: the logs of the run that just crashed.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 5</div>
+<pre class="term"><span class="out">frontend-…     0/1   <span class="bad">ImagePullBackOff</span></span>
+<span class="out">orders-api-…   0/1   <span class="bad">CrashLoopBackOff</span></span>
+<span class="out">redis-…        0/1   <span class="bad">Pending</span></span></pre>
+  <p class="q">Which Pod do you fix first, and why?</p>
+  <div class="a fragment">Check first: <code>describe pod</code> on redis (Events) and <code>logs --previous</code> on the API. If the API log says it can't reach Redis, fix <b>redis</b> first, and the API may recover by itself.</div>
+</section>
+
+<section class="title">
+  <div class="kicker">Read next</div>
+  <h2>Do it yourself</h2>
+  <ul>
+    <li><a href="../lessons/0015-traffic-namespaces-debugging.html">Lesson 15: Traffic, namespaces &amp; debugging</a></li>
+  </ul>
+</section>
+
+</div></div>
+
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="vendor/reveal/plugin/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    center: false,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealNotes, RevealHighlight],
+    keyboard: {
+      // T cycles the course theme: system → light → dark
+      84: function () {
+        var btn = document.querySelector('.theme-toggle');
+        if (btn) btn.click();
+      }
+    }
+  });
+</script>
+</body>
+</html>

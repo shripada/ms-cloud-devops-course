@@ -1,0 +1,209 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lab 2 — hello-app on Kubernetes</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lab 02 · 2.5 hours</div>
+<h1>Lab 2 — Running a React app on a 3-node Kubernetes cluster</h1>
+<p class="lede"><b>Duration:</b> 2 hours 30 minutes. <b>Working mode:</b> solo. Everyone types every command on their own laptop.</p>
+
+<p>The app is a small React page called <code>hello-app</code>. It shows the name of the Pod that answered, once a second. You won't write app code today. You will run it on Kubernetes twice: first with <code>kubectl</code> commands, then with a manifest file. At the end you open it in your browser through a LoadBalancer Service.</p>
+
+<h2>Before you start</h2>
+<p>Do this <em>the night before</em>, not in the lab.</p>
+<ol class="steps">
+<li>Create a free account at <a href="https://hub.docker.com">hub.docker.com</a>. Your Docker Hub username is part of your image name today.</li>
+<li>Log in from the terminal and pre-pull the base images:
+<pre><code>docker login
+docker pull node:20-alpine
+docker pull nginx:alpine</code></pre></li>
+<li>Check that your cluster is running with three nodes:
+<pre><code>kubectl config current-context    # docker-desktop
+kubectl get nodes                 # 3 nodes, all Ready</code></pre></li>
+</ol>
+
+<h2>The plan</h2>
+<table class="schedule">
+<tr><th>Time</th><th>Block</th></tr>
+<tr><td>0:00–0:10</td><td><a href="#b1">Set up your repository</a></td></tr>
+<tr><td>0:10–0:30</td><td><a href="#b2">Build the image and get it to the cluster</a></td></tr>
+<tr><td>0:30–1:10</td><td><a href="#b3">Part 1: run it with commands</a></td></tr>
+<tr><td>1:10–1:20</td><td>Break</td></tr>
+<tr><td>1:20–2:00</td><td><a href="#b4">Part 2: run it from a manifest</a></td></tr>
+<tr><td>2:00–2:20</td><td><a href="#b5">Break it on purpose</a></td></tr>
+<tr><td>2:20–2:30</td><td><a href="#b6">Submit and clean up</a></td></tr>
+</table>
+
+<h2 id="b1"><span class="lab-time">0:00–0:10</span> Set up your repository</h2>
+<ol class="steps">
+<li>Open <a href="https://github.com/shripada/ms-cloud-devops-lab2">github.com/shripada/ms-cloud-devops-lab2</a>, click <b>Use this template → Create a new repository</b>, name it <code>ms-cloud-devops-lab2</code>, and make it <b>public</b>.</li>
+<li>Clone <em>your</em> copy and move into it:
+<pre><code>git clone https://github.com/&lt;your-github-username&gt;/ms-cloud-devops-lab2
+cd ms-cloud-devops-lab2</code></pre></li>
+<li>Clear anything left over from the lessons and Lab 1:
+<pre><code>kubectl get all
+docker ps</code></pre>
+If <code>kubectl get all</code> shows anything besides <code>service/kubernetes</code>, delete it. If <code>docker ps</code> shows a container using port 8080, stop it with <code>docker stop &lt;name&gt;</code>. You need port 8080 free today.</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> three Ready nodes, <code>docker login</code> done, your repository cloned, and port 8080 free.</div>
+
+<h2 id="b2"><span class="lab-time">0:10–0:30</span> Build the image and get it to the cluster</h2>
+<p>Open the <code>Dockerfile</code> and <code>nginx.conf</code> and read them. The Dockerfile is the two-stage frontend build from Lab 1: Node builds the React app, then nginx serves the files on port 80. <code>nginx.conf</code> adds one extra address, <code>/whoami</code>, which replies with the container's hostname. Inside Kubernetes, a Pod's hostname is its Pod name.</p>
+<p>Build the image and test it in plain Docker:</p>
+<pre><code>docker build -t hello-app:v1 .
+docker run --rm -p 8080:80 hello-app:v1</code></pre>
+<p>Open <a href="http://localhost:8080">http://localhost:8080</a>. The page shows a container ID, because there is no Pod yet. Stop the container with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+<p>Now try to run that image on the cluster:</p>
+<pre><code>kubectl create deployment hello-app --image=hello-app:v1 --replicas=3
+kubectl get pods</code></pre>
+<p><b>Predict first:</b> the image is on your laptop. Will the Pods start?</p>
+<div class="trap"><b>Trap 1 — the local image.</b> The Pods sit in <code>ErrImagePull</code> or <code>ImagePullBackOff</code>. Run <code>kubectl describe pod &lt;one-pod-name&gt;</code> and read the <b>Events</b> at the bottom. Your cluster's nodes are separate machines, each with its own image storage. They can't see the images in your laptop's Docker. When a node doesn't have an image, it pulls it from a registry. <code>hello-app:v1</code> with no username means "the official image <code>hello-app</code> on Docker Hub", which doesn't exist.</div>
+<p>Delete the broken Deployment, then tag the image with your Docker Hub username and push it:</p>
+<pre><code>kubectl delete deployment hello-app
+
+docker tag hello-app:v1 &lt;your-dockerhub-username&gt;/hello-app:v1
+docker push &lt;your-dockerhub-username&gt;/hello-app:v1</code></pre>
+<p>From here on, wherever this sheet says <code>&lt;user&gt;</code>, use your Docker Hub username.</p>
+<div class="checkpoint"><b>Checkpoint:</b> you can see <code>hello-app</code> with tag <code>v1</code> on your Docker Hub page, and <code>kubectl get all</code> shows only <code>service/kubernetes</code>.</div>
+
+<h2 id="b3"><span class="lab-time">0:30–1:10</span> Part 1: run it with commands</h2>
+<ol class="steps">
+<li>Create the Deployment again, this time from Docker Hub:
+<pre><code>kubectl create deployment hello-app --image=&lt;user&gt;/hello-app:v1 --replicas=3 --port=80
+kubectl rollout status deployment/hello-app</code></pre></li>
+<li>See where the Pods landed:
+<pre><code>kubectl get pods -o wide</code></pre>
+Look at the <b>NODE</b> column. The scheduler spread your three Pods across <code>desktop-worker</code> and <code>desktop-worker2</code>. None run on <code>desktop-control-plane</code>, because the control-plane node is reserved for the cluster's own components. Each worker pulled your image from Docker Hub on its own.</li>
+<li>Delete one Pod and watch what happens:
+<pre><code>kubectl delete pod &lt;one-pod-name&gt;
+kubectl get pods -o wide</code></pre>
+A new Pod with a new name appears, possibly on a different node. The Deployment wants 3 replicas, saw 2, and created one more.</li>
+<li>Scale up, then back down:
+<pre><code>kubectl scale deployment hello-app --replicas=5
+kubectl get pods -o wide
+kubectl scale deployment hello-app --replicas=3
+kubectl get pods</code></pre></li>
+<li>Expose the Deployment through a LoadBalancer Service. Port <code>8080</code> is what your browser uses; <code>80</code> is where nginx listens inside each Pod:
+<pre><code>kubectl expose deployment hello-app --type=LoadBalancer --port=8080 --target-port=80
+kubectl get service hello-app</code></pre></li>
+</ol>
+<div class="trap"><b>Trap 4 — the EXTERNAL-IP address.</b> The <b>EXTERNAL-IP</b> column shows an address such as <code>172.21.0.8</code>. Paste <code>http://172.21.0.8:8080</code> into your browser and it never loads. That address is inside Docker Desktop's private network, and your laptop can't reach it. Docker Desktop also publishes every LoadBalancer port on <b>localhost</b>, so you use <code>http://localhost:8080</code>. On a cloud provider, the EXTERNAL-IP would be a real public address and you would use it directly.</div>
+<ol class="steps" start="6">
+<li>Open <a href="http://localhost:8080">http://localhost:8080</a>. Watch the <b>Answers so far</b> table for 30 seconds. Every Pod name in it matches a name in <code>kubectl get pods</code>. Each request opens a new connection, and the Service sends each connection to one of its Pods.</li>
+<li>Delete what you made. A Service doesn't belong to a Deployment, so you delete both:
+<pre><code>kubectl delete service,deployment hello-app
+kubectl get all</code></pre></li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> you saw at least two different Pod names on the page, and <code>kubectl get all</code> is back to only <code>service/kubernetes</code>.</div>
+
+<h2 id="b4"><span class="lab-time">1:20–2:00</span> Part 2: run it from a manifest</h2>
+<p>Commands are quick, but nothing records what you ran. Next, you'll write the same Deployment and Service into one file, <code>hello-app.yaml</code>, in the root of your repository. Write it by hand, from this outline:</p>
+<ul>
+<li>A Deployment named <code>hello-app</code>: 3 replicas, a selector <code>app: hello-app</code>, a Pod template with the label <code>app: hello-app</code>, and one container named <code>hello-app</code> running <code>&lt;user&gt;/hello-app:v1</code> with <code>containerPort: 80</code>.</li>
+<li>A line with only <code>---</code>.</li>
+<li>A Service named <code>hello-app</code>: <code>type: LoadBalancer</code>, selector <code>app: hello-app</code>, one port with <code>port: 8080</code> and <code>targetPort: 80</code>.</li>
+</ul>
+<p>Use lesson 11 if you need to check a field. Write it yourself before you open the hint below.</p>
+<details><summary>Hint: the complete file</summary>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hello-app
+  template:
+    metadata:
+      labels:
+        app: hello-app
+    spec:
+      containers:
+        - name: hello-app
+          image: &lt;user&gt;/hello-app:v1
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: hello-app
+  ports:
+    - port: 8080
+      targetPort: 80</code></pre>
+</details>
+<ol class="steps">
+<li>Apply it and check the result:
+<pre><code>kubectl apply -f hello-app.yaml
+kubectl rollout status deployment/hello-app
+kubectl get pods -o wide
+kubectl get service hello-app
+kubectl get endpointslices -l kubernetes.io/service-name=hello-app</code></pre>
+The EndpointSlice lists the IP address of every Pod the Service has selected, with port 80. Open <a href="http://localhost:8080">http://localhost:8080</a> again.</li>
+<li>Change <code>replicas: 3</code> to <code>replicas: 4</code> in the file, then apply again:
+<pre><code>kubectl apply -f hello-app.yaml
+kubectl get pods</code></pre>
+<b>Predict first:</b> what will apply print for the Deployment, and for the Service? In the browser, a fourth Pod name joins the table.</li>
+<li>Compare your file with what <code>kubectl</code> would generate. <code>--dry-run=client -o yaml</code> prints the object instead of creating it:
+<pre><code>kubectl create deployment hello-app --image=&lt;user&gt;/hello-app:v1 --replicas=3 --port=80 --dry-run=client -o yaml
+kubectl create service loadbalancer hello-app --tcp=8080:80 --dry-run=client -o yaml</code></pre>
+The core fields match yours. The generated YAML has extra fields, such as <code>creationTimestamp</code>, <code>strategy</code>, <code>resources</code> and <code>status</code>, which are empty or defaults. Note two of them for your README.</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> <code>hello-app.yaml</code> creates both objects with one command, and the browser shows four Pod names.</div>
+
+<h2 id="b5"><span class="lab-time">2:00–2:20</span> Break it on purpose</h2>
+<p>Keep the browser tab open on <a href="http://localhost:8080">http://localhost:8080</a> during both traps. The page keeps asking every second, so you will see the moment it breaks.</p>
+<div class="trap"><b>Trap 2 — the selector typo.</b> In the <b>Service</b> part of the file, change the selector to <code>app: helo-app</code> (one <code>l</code>). Apply, then run:
+<pre><code>kubectl get service hello-app
+kubectl get endpointslices -l kubernetes.io/service-name=hello-app</code></pre>
+The Service still exists, and so do the Pods. But the EndpointSlice is now empty: no Pod has the label <code>app: helo-app</code>, so the Service has nowhere to send traffic. The page shows an error. Fix the typo, apply, and the page recovers.</div>
+<div class="trap"><b>Trap 3 — the wrong targetPort.</b> Change <code>targetPort: 80</code> to <code>targetPort: 8080</code>. Apply, then check the EndpointSlice again. This time it lists your Pods, now with port 8080. The Service found the Pods, but it sends traffic to port 8080 and nothing in the Pod listens there. nginx listens on 80. The page shows an error again. Change it back to 80, apply, and the page recovers.</div>
+<p>In your README, write what you saw for each trap and why. The EndpointSlice is what tells the two traps apart: empty means the selector is wrong; Pods listed on the wrong port means the targetPort is wrong.</p>
+
+<h2 id="b6"><span class="lab-time">2:20–2:30</span> Submit and clean up</h2>
+<ol class="steps">
+<li>Fill in every section of <code>README.md</code>. Paste the command outputs it asks for, and save a browser screenshot as <code>screenshot.png</code> in the repository root.</li>
+<li>Commit and push:
+<pre><code>git add hello-app.yaml README.md screenshot.png
+git commit -m "Lab 2 submission"
+git push</code></pre></li>
+<li>Open your repository on GitHub and check that all three files are there.</li>
+<li>Delete everything the file created:
+<pre><code>kubectl delete -f hello-app.yaml
+kubectl get all</code></pre></li>
+</ol>
+<p>Before you leave, you should be able to answer these without looking:</p>
+<div class="quiz recall">
+<p class="q">1. You built an image on your laptop, but the Pods using it are stuck in <code>ImagePullBackOff</code>. Why?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The Pods run on the cluster's nodes, and each node has its own image storage. A node can't see the images in your laptop's Docker, so it tries to pull the image from a registry. If the image isn't in a registry the node can reach, the pull fails. Pushing the image to Docker Hub and using that name fixes it.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">2. A Service exists but your browser can't reach the app. Its EndpointSlice is empty. What do you check first?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The Service's selector against the Pods' labels. An empty EndpointSlice means no running Pod carries the labels the selector asks for. Compare <code>spec.selector</code> in the Service with the labels shown by <code>kubectl get pods --show-labels</code>.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">3. In the Service, what is the difference between <code>port: 8080</code> and <code>targetPort: 80</code>?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p><code>port</code> is where clients connect to the Service; today that was 8080 from the browser. <code>targetPort</code> is the port inside each selected Pod the traffic goes to. It must be where the app really listens, which is 80 for nginx here.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">4. You deleted a Pod and a new one appeared. Which object created it, and why?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The Deployment, through its ReplicaSet. It keeps comparing the number of running Pods with <code>replicas</code>. It saw two instead of three and created one more from the Pod template.</p></details>
+</div>
+
+<h2>Common mistakes</h2>
+<ul>
+<li>Using <code>hello-app:v1</code> in the manifest instead of <code>&lt;user&gt;/hello-app:v1</code></li>
+<li>Opening the EXTERNAL-IP instead of <code>localhost:8080</code></li>
+<li>Leaving the <code>docker run</code> test container or a Lab 1 container on port 8080</li>
+<li>Indenting YAML with tabs, or putting <code>containers:</code> at the wrong level</li>
+<li>Deleting the Deployment but forgetting the Service in Part 1</li>
+</ul>
+
+<nav class="course"><a href="../index.html">← Course home</a><a href="lab-1-containerize.html">← Lab 1</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>

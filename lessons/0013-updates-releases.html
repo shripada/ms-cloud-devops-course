@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Updates and releases</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
-<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 13</div>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 13 · <a href="../slides/0013-updates-releases.html">Slides</a></div>
 <h1>Updates &amp; releases</h1>
 
 <h2>Why this matters for DevOps</h2>
@@ -46,7 +46,7 @@ One ReplicaSet with 4 Pods.</li>
 <pre><code>kubectl apply -f who.yaml
 kubectl rollout status deployment/who
 kubectl get rs -l app=who</code></pre>
-In the watch you see one new Pod appear, become <code>1/1</code>, then one old Pod <code>Terminating</code>, four times over. At most 5 Pods, never fewer than 4 ready. Now there are <em>two</em> ReplicaSets: the new one with 4 and the old one with 0. The old one is kept on purpose: it's the way back.</li>
+In the watch you see one new Pod appear, become <code>1/1</code>, then one old Pod <code>Terminating</code>, four times over. At most 5 non-terminating rollout Pods count towards <code>replicas + maxSurge</code>, and there are never fewer than 4 ready. A terminating Pod is not counted in that limit, so <code>kubectl get pods</code> can briefly display more than 5 while its grace period expires. Now there are <em>two</em> ReplicaSets: the new one with 4 and the old one with 0. The old one is kept on purpose: it's the way back.</li>
 <li>Ship a broken version. Change the container to pass an argument whoami doesn't know, as if a bad build crashes on start-up. Under the container, next to <code>image</code>, add:
 <pre><code>          args: ["--no-such-flag"]</code></pre>
 <pre><code>kubectl apply -f who.yaml
@@ -118,19 +118,40 @@ Every answer comes from a <code>shop-blue-…</code> Pod. Green is running and r
 
 <h2>Do it: pulling from a private registry</h2>
 <ol class="steps" start="9">
-<li>In <a href="0008-build-push-ci.html">lesson 8</a> your CI pushed an image to GitHub Container Registry (GHCR). If that package is private, try to run it (put your own GitHub username and image name in):
-<pre><code>kubectl create deployment mine --image=ghcr.io/YOUR-USERNAME/YOUR-IMAGE:latest
+<li>In <a href="0008-build-push-ci.html">lesson 8</a> your CI pushed an image to GitHub Container Registry (GHCR). If that package is private, define the workload in <code>mine.yaml</code> (put your own GitHub username, image name and immutable tag in):
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mine
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mine }
+  template:
+    metadata:
+      labels: { app: mine }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/YOUR-USERNAME/YOUR-IMAGE:YOUR-TAG</code></pre>
+<pre><code>kubectl apply -f mine.yaml
 kubectl get pods -l app=mine
 kubectl describe pod -l app=mine | tail -5</code></pre>
 <code>ImagePullBackOff</code>, and the events say something like <code>401 Unauthorized</code> or <code>denied</code>. The kubelet on the node tried to pull the image with no login. (If your package is public it just works; change its visibility to private in GitHub to try this.)</li>
-<li>Give the cluster credentials. Create a GitHub personal access token (classic) with only the <code>read:packages</code> scope, store it in a Secret of type <code>docker-registry</code>, and tell the Pod to use it:
-<pre><code>kubectl create secret docker-registry ghcr-pull \
+<li>Give the cluster credentials. Create a GitHub personal access token (classic) with only the <code>read:packages</code> scope. Generate a local Secret manifest, keep it out of Git, and apply it:
+<pre><code>printf '%s\n' 'ghcr-pull.local.yaml' &gt;&gt; .gitignore
+kubectl create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io \
   --docker-username=YOUR-USERNAME \
-  --docker-password=YOUR-TOKEN
-kubectl patch deployment mine -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull"}]}}}}'
+  --docker-password=YOUR-TOKEN \
+  --dry-run=client -o yaml &gt; ghcr-pull.local.yaml
+kubectl apply -f ghcr-pull.local.yaml</code></pre>
+Now add <code>imagePullSecrets</code> to <code>mine.yaml</code> under the Pod's <code>spec</code>, beside <code>containers</code>:
+<pre><code>      imagePullSecrets:
+        - name: ghcr-pull</code></pre>
+<pre><code>kubectl apply -f mine.yaml
 kubectl get pods -l app=mine -w</code></pre>
-The new Pod pulls the image and runs. In a manifest this is two lines under the Pod's <code>spec:</code>: <code>imagePullSecrets:</code> and <code>- name: ghcr-pull</code>. (You can also attach the Secret to the namespace's <code>default</code> ServiceAccount so every Pod gets it.) Clean up: <code>kubectl delete deployment mine</code> and <code>kubectl delete secret ghcr-pull</code>.</li>
+The new Pod pulls the image and runs. The Deployment's desired state remains in <code>mine.yaml</code>; only the credential value stays in the ignored local file. At work, a secrets manager or encrypted-secret controller normally supplies it. Clean up: <code>kubectl delete -f mine.yaml -f ghcr-pull.local.yaml</code>.</li>
 </ol>
 
 <div class="trap"><b>Drill.</b> The college results portal has 6 replicas with <code>maxSurge: 2</code> and <code>maxUnavailable: 1</code>, and a readiness probe. (a) During an update, what's the most Pods that can exist, and the fewest that can be ready? (b) The new version never becomes ready. How many old Pods are still serving when the rollout gets stuck? (c) Version 4.0 changes the results table so version 3.x can't read it. Which strategy, and why?
@@ -217,7 +238,7 @@ spec:
 <li><b>RollingUpdate</b> (default): replaces Pods a few at a time, within <code>maxSurge</code> and <code>maxUnavailable</code>, so there is no downtime, but old and new versions run side by side for a while.</li>
 <li><b>Recreate:</b> stops all old Pods, then starts the new ones. There's a short downtime, but the two versions never run at the same time.</li>
 <li><b>Blue-green:</b> run two Deployments, <code>results-blue</code> (4.x, labelled <code>version: blue</code>) and <code>results-green</code> (5.0, <code>version: green</code>). The Service selects <code>version: blue</code>. Test green privately, then change the Service's selector to <code>version: green</code>: all traffic switches at once, and switching back is instant.</li>
-<li><b>Canary:</b> both Deployments share a label the Service selects on, for example <code>app: results</code>, with 9 old Pods and 1 new one, so about 10% of requests reach the new version. Watch its errors, then shift the replica counts step by step. (An Ingress controller or service mesh can split by exact percentage.)</li>
+<li><b>Canary:</b> both Deployments share a label the Service selects on, for example <code>app: results</code>, with 9 old Pods and 1 new one, so about 10% of requests reach the new version. Watch its errors, then shift the replica counts step by step. (A Gateway API implementation or service mesh can split by explicit weights.)</li>
 <li><b>For 5.0:</b> rolling update and canary both run 4.x and 5.0 together, and 4.x Pods would fail once the column is renamed. Use <b>Recreate</b> in a planned maintenance window (stop 4.x, migrate, start 5.0), or blue-green with a single planned cut-over and the migration done at the switch. Better long-term: change the schema in backward-compatible steps (add the new column, deploy, then drop the old one), so rolling updates work again.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> RollingUpdate vs Recreate 1; blue-green and canary with labels and Services 2; strategy for the schema change with reasoning 2.</p>

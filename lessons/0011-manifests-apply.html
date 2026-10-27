@@ -104,25 +104,39 @@ kind: Service
 metadata:
   name: who
 spec:
+  type: LoadBalancer
   selector:
     app: who
   ports:
-    - port: 80
+    - name: http
+      port: 8099
       targetPort: 80</code></pre>
-Read it field by field. It's the same object you printed with <code>kubectl get service who -o yaml</code> in lesson 10:
+Read it field by field. It uses the same Service fields you inspected in lesson 10, now declared directly as a LoadBalancer Service:
 <ul>
 <li><code>apiVersion: v1</code> and <code>kind: Service</code>: Services belong to the core API group, which is written as just <code>v1</code>.</li>
-<li><code>metadata.name: who</code>: the Service's name. A Pod in the same namespace can call <code>http://who</code>. A Pod in another namespace needs a qualified name such as <code>who.default</code> or <code>who.default.svc.cluster.local</code>.</li>
+<li><code>metadata.name: who</code>: the Service's name. A Pod in the same namespace can call <code>http://who:8099</code>. A Pod in another namespace needs a qualified name such as <code>who.default:8099</code> or <code>who.default.svc.cluster.local:8099</code>.</li>
 <li><code>spec.selector: app: who</code>: send traffic to Pods carrying this label. This selector should match the Pod labels under <code>template.metadata.labels</code>, because those are the labels the Pods actually get. Unlike a mismatched Deployment selector, a Service selector that matches no Pods is still valid: the Service is created, but it has no endpoints and cannot deliver requests.</li>
-<li><code>port: 80</code>: the port clients use on the Service. <code>targetPort: 80</code>: the port on the selected Pods to which traffic is sent. The target must be where the application process really listens. The Deployment's <code>containerPort</code> documents that expectation but does not configure the process or control a numeric <code>targetPort</code>. If the app listened on 3000, you would keep <code>port: 80</code> and set <code>targetPort: 3000</code>.</li>
-<li>There is no <code>type</code> line, so this is a <code>ClusterIP</code> Service, reachable only inside the cluster. To open it to your laptop on this course setup, you would add <code>type: LoadBalancer</code> under <code>spec</code>. To choose a fixed node port, add <code>nodePort: 30090</code> next to <code>port</code> and use <code>type: NodePort</code> or <code>LoadBalancer</code>.</li>
+<li><code>port: 8099</code>: the port clients use on the Service. <code>targetPort: 80</code>: the port on the selected Pods to which traffic is sent. The target must be where the application process really listens. The Deployment's <code>containerPort</code> documents that expectation but does not configure the process or control a numeric <code>targetPort</code>.</li>
+<li><code>type: LoadBalancer</code> asks a load-balancer implementation to expose the Service outside the cluster. Kubernetes defines the request but does not contain an external load balancer itself. A cloud controller may create an AWS, Azure or Google Cloud load balancer; minikube emulates one with <code>minikube tunnel</code>; a plain kind cluster needs an implementation such as Cloud Provider KIND or MetalLB. Without one, the Service still works inside the cluster but its external address stays <code>&lt;pending&gt;</code>.</li>
+<li>A LoadBalancer Service usually receives a ClusterIP and an automatically allocated NodePort as well. Do not hard-code <code>nodePort</code> unless the surrounding network requires a fixed value. Some implementations route directly to Pods and support <code>allocateLoadBalancerNodePorts: false</code>.</li>
 </ul>
 <p class="aside">Trace the connection: the Deployment selector must match the Pod-template labels so the Deployment can manage its Pods. The Service selector independently looks for those Pod labels so it can send traffic to them. Client traffic arrives at the Service's <code>port</code>, then goes to the application's real listening port through <code>targetPort</code>.</p>
 <b>Predict first:</b> the file now has two objects, and one of them already exists. What will apply print for each? Then run it:
 <pre><code>kubectl apply -f who.yaml
-kubectl get deployment,service who</code></pre>
+kubectl rollout status deployment/who
+kubectl get deployment,service who
+kubectl get endpointslices -l kubernetes.io/service-name=who</code></pre>
 You see <code>deployment.apps/who unchanged</code> and <code>service/who created</code>. Apply handles each object on its own: it left the Deployment alone and created only the missing Service. This also means a multi-document apply is not one transaction. If one object is valid and a later object is invalid, the valid object may already have been changed.</li>
-<li>Delete the objects named in the file, using the same file:
+<li>Watch the external address in another terminal:
+<pre><code>kubectl get service who --watch</code></pre>
+How you reach it depends on the cluster:
+<ul>
+<li><b>Docker Desktop:</b> if Docker Desktop supplies the load-balancer implementation, wait for an address and open <code>http://localhost:8099</code>. If the address remains <code>&lt;pending&gt;</code>, use the kind instructions below.</li>
+<li><b>minikube:</b> run <code>minikube tunnel</code> in the second terminal and leave it running. Use the address shown by <code>kubectl get service who</code> on port 8099.</li>
+<li><b>Plain kind:</b> install Cloud Provider KIND or MetalLB before expecting an external address. Until then, <code>&lt;pending&gt;</code> is correct.</li>
+</ul>
+On any cluster you can test the application without an external load balancer by running <code>kubectl port-forward service/who 8099:8099</code> and opening <code>http://localhost:8099</code>. That is a diagnostic tunnel from your laptop; it does not test the LoadBalancer path. Refresh several times and notice different Pod names answering. The complete desired state—the application and its externally exposed Service—is now in one manifest.</li>
+<li>Delete the objects named in the file, using the same file. Stop any tunnel or port-forward with Ctrl+C first:
 <pre><code>kubectl delete -f who.yaml
 kubectl get all</code></pre>
 Both the Deployment and the Service are gone, and only the built-in <code>kubernetes</code> Service remains. Compare with lesson 10, where you had to remember to delete the Service separately. The file remembers for you. Keep <code>who.yaml</code>: you will build on it in the next lessons.</li>
@@ -239,7 +253,7 @@ spec:
 </div>
 
 <h2>Read next</h2>
-<p><b>Primary source:</b> the Kubernetes pages <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Objects in Kubernetes</a> (about spec and status) and <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">Declarative management of Kubernetes objects using configuration files</a> (read up to “How apply calculates differences”). About 20 minutes in total.</p>
+<p><b>Primary source:</b> the Kubernetes pages <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Objects in Kubernetes</a> (about spec and status), <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">Declarative management of Kubernetes objects using configuration files</a> (read up to “How apply calculates differences”), and <a href="https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer">Service type LoadBalancer</a>. About 25 minutes in total.</p>
 <p>Keep handy: <a href="https://kubernetes.io/docs/reference/kubectl/quick-reference/">kubectl quick reference</a></p>
 
 <div class="box">💬 <b>Stuck or curious?</b> Ask your teacher (Claude) anything, for example “how does apply know which fields I removed from the file?”, “what is server-side apply?”, or paste any YAML error you see. When you're done, tell Claude how the quiz went so lesson 12 (ConfigMaps and Secrets) is pitched right.</div>

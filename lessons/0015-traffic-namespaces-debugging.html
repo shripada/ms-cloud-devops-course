@@ -1,61 +1,136 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Traffic, namespaces and debugging</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
-<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 15</div>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 15 · <a href="../slides/0015-traffic-namespaces-debugging.html">Slides</a></div>
 <h1>Traffic, namespaces &amp; debugging</h1>
 
 <h2>Why this matters for DevOps</h2>
-<p>A real shop has a frontend, an API and more, all behind one website address. Giving each Service its own cloud load balancer costs money for every one (on AWS, roughly ₹1,500–2,000 a month each, before traffic) and gives you many addresses to manage. And a real cluster isn't yours alone: dev, testing and sometimes other teams share it, so one team's mistake must not starve the others. Finally, every week something is <code>Pending</code> or <code>CrashLoopBackOff</code>, and the person who can find out why in two minutes is the one the team calls.</p>
+<p>A real shop has a frontend, an API and more, all behind one website address. Giving each Service its own cloud load balancer creates another billable resource and another address, certificate and firewall policy to manage. And a real cluster isn't yours alone: dev, testing and sometimes other teams share it, so one team's mistake must not starve the others. Finally, every week something is <code>Pending</code> or <code>CrashLoopBackOff</code>, and the person who can find out why in two minutes is the one the team calls.</p>
 
 <h2>Three ideas, no more</h2>
-<p><b>Ingress and its controller</b>: an <em>Ingress</em> is a list of HTTP routing rules: “requests for host <code>shop.example.com</code> with a path starting <code>/api</code> go to the <code>api</code> Service”. The Ingress object does nothing by itself. An <em>ingress controller</em> (a reverse proxy like NGINX or Traefik running in the cluster) reads those rules and does the routing. You pay for one load balancer in front of the controller, and it fans out to many Services. <code>ingressClassName</code> says which controller should handle it; <code>pathType: Prefix</code> matches <code>/api</code>, <code>/api/orders</code> and so on, while <code>Exact</code> matches only that one path. <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">[Kubernetes docs: Ingress]</a></p>
+<p><b>Gateway API and its implementation</b>: Gateway API is the modern Kubernetes API for traffic entering and moving through a cluster. A <code>GatewayClass</code> chooses an implementation, a <code>Gateway</code> declares listeners such as HTTP on port 80, and an <code>HTTPRoute</code> says “requests for <code>shop.local</code> whose path is <code>/api</code> or under it (<code>/api/orders</code>, but not <code>/apiary</code>) go to the <code>api</code> Service”. These objects are configuration; they do not proxy traffic by themselves. In this lesson, the Envoy Gateway controller watches them and configures Envoy Proxy Pods, which handle the live requests. Kubernetes recommends Gateway API for new work; the older Ingress API is frozen but not scheduled for removal. <a href="https://gateway-api.sigs.k8s.io/guides/getting-started/">[Gateway API: Getting started]</a> <a href="https://gateway.envoyproxy.io/docs/concepts/">[Envoy Gateway architecture]</a></p>
 <p><b>Namespaces, labels and ResourceQuotas</b>: a <em>namespace</em> is a folder for objects: names only have to be unique inside it, and you give each team its own. <em>Labels</em> are tags on objects (<code>app=front</code>, <code>team=testing</code>) that you filter on with <code>-l</code>. A <em>ResourceQuota</em> caps what one namespace may use in total: CPU, memory, number of Pods. The API server refuses any new Pod that would go over. <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/">[Kubernetes docs: Resource Quotas]</a></p>
-<p><b>kubeconfig and contexts</b>: <code>~/.kube/config</code> lists clusters, users (credentials) and <em>contexts</em>. A context is a saved pair: “this cluster, as this user, in this namespace”. kubectl talks to whichever context is current. One engineer with a laptop cluster and an EKS cluster has two contexts and switches between them. <a href="https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/">[Kubernetes docs: kubeconfig]</a></p>
-<p class="aside">A big apartment building has one main gate with a security guard. The guard (ingress controller) reads the visitor register rules (Ingress): “flat 4B, go to Tower A”. Each tower is a namespace, and the society's rule “each tower gets at most 3 parking spots” is a ResourceQuota.</p>
+<p><b>kubeconfig and contexts</b>: <code>~/.kube/config</code> lists clusters, users (credentials) and <em>contexts</em>. A context is a saved combination of cluster, user and default namespace. kubectl talks to whichever context is current. One engineer with a laptop cluster and an EKS cluster has two contexts and switches between them. <a href="https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/">[Kubernetes docs: kubeconfig]</a></p>
+<p class="aside">A big apartment building has one main gate. The gate itself is the Gateway, the security company named in its contract is the GatewayClass, and the visitor register contains the HTTPRoute rules: “visitors for flat 4B, go to Tower A”. Envoy Proxy is the guard who handles each visitor. Each tower is a namespace, and “each tower gets at most 3 parking spots” is a ResourceQuota.</p>
 
 <h2>Before you start</h2>
-<p>Same cluster and folder. You need about 1 GB of free memory for the ingress controller. Open a second terminal.</p>
+<p>Same cluster and folder. You need about 1 GB of free memory for Envoy Gateway and the managed Envoy Proxy. Open a second terminal. The install manifest is pinned to Envoy Gateway <code>v1.9.2</code> so the exercise does not change underneath you.</p>
 
-<h2>Do it: one Ingress, two Services</h2>
+<h2>Do it: one Gateway, two Services</h2>
 <ol class="steps">
-<li>Install the NGINX ingress controller (one apply of the project's own manifest) and wait for it:
-<pre><code>kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/cloud/deploy.yaml
-kubectl wait -n ingress-nginx --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=180s
-kubectl get ingressclass</code></pre>
-You see an IngressClass called <code>nginx</code>. (The ingress-nginx project stopped getting new features in 2026, and new clusters often use <em>Gateway API</em>, its successor. The Ingress idea is the same, and it's still what most clusters use.)</li>
-<li>Make two small apps, each with a ClusterIP Service:
-<pre><code>kubectl create deployment web --image=traefik/whoami:v1.11
-kubectl create deployment api --image=traefik/whoami:v1.11
-kubectl expose deployment web --port=80
-kubectl expose deployment api --port=80</code></pre></li>
-<li>Write the Ingress. Create <code>ingress.yaml</code>:
-<pre><code>apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: shop
+<li>Install the Gateway API CRDs and the Envoy Gateway controller from the project's pinned manifest, then wait for the controller:
+<pre><code>kubectl apply --server-side -f https://github.com/envoyproxy/gateway/releases/download/v1.9.2/install.yaml
+kubectl wait --timeout=5m -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available
+kubectl get crd gateways.gateway.networking.k8s.io</code></pre>
+Envoy Gateway is the control plane: it watches Gateway API objects and creates or configures Envoy Proxy as the data plane. Envoy Proxy alone would not watch these Kubernetes objects.</li>
+<li>Declare both applications, both internal Services and the complete routing configuration in <code>shop.yaml</code>:
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web }
 spec:
-  ingressClassName: nginx
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+          ports: [{ name: http, containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web }
+spec:
+  selector: { app: web }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+          ports: [{ name: http, containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec:
+  selector: { app: api }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata: { name: eg }
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: shop }
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces: { from: Same }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: shop }
+spec:
+  parentRefs:
+    - name: shop
+  hostnames: [shop.local]
   rules:
-    - host: shop.local
-      http:
-        paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service: { name: api, port: { number: 80 } }
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: web, port: { number: 80 } }</code></pre>
-<pre><code>kubectl apply -f ingress.yaml
-kubectl get ingress shop</code></pre></li>
-<li>Reach the controller. On a laptop the simplest way is a port-forward. In the second terminal:
-<pre><code>kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80</code></pre>
-Back in the first, send requests with the <code>Host</code> header a browser would send for <code>shop.local</code>:
+    - matches:
+        - path: { type: PathPrefix, value: /api }
+      backendRefs:
+        - { name: api, port: 80 }
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - { name: web, port: 80 }</code></pre>
+The application Services omit <code>type</code>, so they are ClusterIP Services. Only Envoy's entry-point Service needs external exposure. This lab keeps every object together so you can see the complete system. At work, a platform team commonly owns the <code>GatewayClass</code> and shared <code>Gateway</code>, while application teams own their Deployments, Services and HTTPRoutes.</li>
+<li>Apply the one file and inspect both desired and observed state:
+<pre><code>kubectl apply -f shop.yaml
+kubectl rollout status deployment/web
+kubectl rollout status deployment/api
+kubectl get gatewayclass,gateway,httproute
+kubectl describe gateway shop
+kubectl describe httproute shop</code></pre>
+The <code>Gateway</code> should become <code>Accepted</code> and <code>Programmed</code>; the <code>HTTPRoute</code> should show that its parent accepted it. Envoy Gateway also creates an Envoy Proxy Deployment and a LoadBalancer Service for this Gateway.</li>
+<li>Find that LoadBalancer Service:
+<pre><code>kubectl get service -n envoy-gateway-system \
+  -l gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=shop</code></pre>
+On minikube, run <code>minikube tunnel</code> in the second terminal. On a supported cloud or a local cluster with a load-balancer implementation, use the address in <code>kubectl get gateway shop</code>:
+<pre><code>GATEWAY_HOST=$(kubectl get gateway shop -o jsonpath='{.status.addresses[0].value}')
+curl -s -H "Host: shop.local" http://$GATEWAY_HOST/ | grep Hostname
+curl -s -H "Host: shop.local" http://$GATEWAY_HOST/api/orders | grep Hostname</code></pre>
+If the address remains empty or <code>&lt;pending&gt;</code>, the cluster has no LoadBalancer implementation; that is an infrastructure condition, not an HTTPRoute error.<br>
+For a local fallback, find the generated Service and port-forward it:
+<pre><code>ENVOY_SERVICE=$(kubectl get service -n envoy-gateway-system \
+  -l gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=shop \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl port-forward -n envoy-gateway-system service/$ENVOY_SERVICE 8080:80</code></pre>
+This fallback enters through Envoy and exercises the Gateway and HTTPRoute, but bypasses the external load balancer. Back in the first terminal, send requests with the <code>Host</code> header:
 <pre><code>curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname
 curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname
 curl -s -H "Host: other.local" http://localhost:8080/ | head -3</code></pre>
-The first says <code>web-…</code>, the second <code>api-…</code>. The third gets <code>404 Not Found</code> from NGINX: no rule matches that host. One entry point, routing by host and path. On AWS, the controller's Service would be <code>type: LoadBalancer</code>: one cloud load balancer for the whole shop.</li>
-<li>Break it twice. First, change the <code>/</code> rule's <code>pathType</code> to <code>Exact</code>, apply, and try <code>/</code> and <code>/about</code>. <code>/</code> still works but <code>/about</code> is 404: <code>Exact</code> matches only the exact path. Put it back to <code>Prefix</code>. Second, delete the <code>ingressClassName: nginx</code> line and apply. Requests now get 404 for everything: no controller claims the Ingress, so its rules are ignored. Put it back. Leave the Ingress running for now.</li>
+The first answers from a <code>web-…</code> Pod, the second from an <code>api-…</code> Pod, and the third gets 404 because no route matches that hostname. One Envoy entry point routes to both internal Services.</li>
+<li>Break the route twice. First, change the <code>/</code> match from <code>PathPrefix</code> to <code>Exact</code>, apply, and try <code>/</code> and <code>/about</code>. Only <code>/</code> works. Restore <code>PathPrefix</code>. Second, change the HTTPRoute's <code>parentRefs</code> name from <code>shop</code> to <code>missing</code> and apply. <code>kubectl describe httproute shop</code> no longer shows an accepted attachment to the working Gateway, and the route is not programmed. Restore <code>shop</code>, apply, and wait for the accepted status.</li>
 </ol>
 
 <h2>Do it: sharing a cluster</h2>
@@ -78,12 +153,45 @@ spec:
     requests.memory: 1Gi</code></pre>
 <pre><code>kubectl apply -f testing.yaml
 kubectl describe quota -n testing</code></pre></li>
-<li>The testing team asks for 5 replicas. <b>Predict first:</b> how many Pods start?
-<pre><code>kubectl create deployment front -n testing --image=traefik/whoami:v1.11 --replicas=5
+<li>The testing team asks for 5 replicas. Add the Deployment and its internal Service to the bottom of <code>testing.yaml</code>:
+<pre><code>---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front
+  namespace: testing
+spec:
+  replicas: 5
+  selector:
+    matchLabels: { app: front }
+  template:
+    metadata:
+      labels: { app: front }
+    spec:
+      containers:
+        - name: front
+          image: traefik/whoami:v1.11
+          ports: [{ name: http, containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: front
+  namespace: testing
+spec:
+  selector: { app: front }
+  ports: [{ name: http, port: 80, targetPort: http }]</code></pre>
+<b>Predict first:</b> how many Pods start? Apply the complete desired state:
+<pre><code>kubectl apply -f testing.yaml
 kubectl get pods -n testing
 kubectl get events -n testing --sort-by=.lastTimestamp | tail -3</code></pre>
-Zero! The event says something like <code>failed quota: team-quota: must specify requests.cpu…</code>. Once a namespace has a CPU or memory quota, every Pod must say how much it requests, or the quota can't count it. Add requests:
-<pre><code>kubectl set resources deployment front -n testing --requests=cpu=100m,memory=64Mi
+Zero! The event says something like <code>failed quota: team-quota: must specify requests.cpu…</code>. Once a namespace has a CPU or memory quota, every Pod must say how much it requests, or the quota can't count it. Add this under the container in <code>testing.yaml</code>, beside <code>ports</code>:
+<pre><code>          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi</code></pre>
+Reconcile from the file:
+<pre><code>kubectl apply -f testing.yaml
 sleep 10
 kubectl get pods -n testing
 kubectl describe quota -n testing</code></pre>
@@ -91,10 +199,9 @@ Now 3 Pods run. The quota shows <code>pods 3/3</code>. The events say <code>exce
 <li>Labels and names across namespaces:
 <pre><code>kubectl get pods -n testing -l app=front
 kubectl get pods -A -l app=front
-kubectl expose deployment front -n testing --port=80
 kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- \
   wget -qO- http://front.testing.svc.cluster.local | grep Hostname</code></pre>
-<code>-l</code> filters by label, <code>-A</code> looks in all namespaces. A Pod in <code>default</code> reached a Service in <code>testing</code> by its full DNS name, <code>&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local</code>. Inside the same namespace the short name (<code>front</code>) is enough. Note what namespaces <em>don't</em> do: they don't block network traffic between teams. That needs a NetworkPolicy. Clean up: <code>kubectl delete namespace testing</code> deletes everything inside it.</li>
+<code>-l</code> filters by label, <code>-A</code> looks in all namespaces. A temporary Pod in <code>default</code> reached the manifest-managed Service in <code>testing</code> by its full DNS name, <code>&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local</code>. Inside the same namespace the short name (<code>front</code>) is enough. Note what namespaces <em>don't</em> do: they don't block network traffic between teams. That needs a NetworkPolicy. Clean up with <code>kubectl delete -f testing.yaml</code>; because the file includes the Namespace, everything in it is removed.</li>
 <li>Look at your kubeconfig:
 <pre><code>kubectl config get-contexts
 kubectl config current-context
@@ -105,7 +212,7 @@ The <code>*</code> marks the current context. When you later run <code>aws eks u
 <tr><th>Option</th><th>What it is</th><th>Good for</th></tr>
 <tr><td>kind / minikube / Docker Desktop</td><td>Nodes are containers or a VM on your laptop; one command to create</td><td>A developer's laptop; quick throwaway practice</td></tr>
 <tr><td>kubeadm on VMs</td><td>You install and join every node yourself, and you run upgrades, certificates and etcd backups</td><td>A college lab: you learn every part, and it costs nothing extra</td></tr>
-<tr><td>Managed (EKS, AKS, GKE)</td><td>The cloud runs the control plane across zones; you choose worker nodes</td><td>A production shop: high availability and upgrades handled, pay per hour</td></tr>
+<tr><td>Managed (EKS, AKS, GKE)</td><td>The cloud runs the control plane; you still plan version upgrades and manage node pools and add-ons</td><td>A production shop: less control-plane operations, with cloud charges</td></tr>
 </table>
 
 <h2>Do it: the debugging flowchart</h2>
@@ -127,61 +234,58 @@ kubectl get pods -l app=big
 kubectl describe pod -l app=big | grep -A3 Events</code></pre>
 Read it piece by piece: <code>0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 2 Insufficient memory</code>. That's all three nodes explained: the control plane node is tainted so normal Pods stay off it (lesson 9), and neither worker has 64 GiB free. Fix: ask for a sensible amount (or add bigger nodes). <code>kubectl delete deployment big</code>.</li>
 <li>One more pattern to recognise: an API's logs say <code>connect ECONNREFUSED 127.0.0.1:5432</code>. Inside a Pod, <code>127.0.0.1</code> (localhost) is the Pod itself, and the database runs in a different Pod. The app must use the database's Service name, like <code>db</code> or <code>db.shop.svc.cluster.local</code>, usually set through a ConfigMap. It works when the app and database both run straight on your laptop, then breaks in the cluster, so it shows up in nearly every first deploy.</li>
-<li>Clean up everything from today: <code>kubectl delete -f ingress.yaml</code>, <code>kubectl delete deployment web api</code>, <code>kubectl delete service web api</code>, and, if you want the memory back, <code>kubectl delete namespace ingress-nginx</code>.</li>
+<li>Clean up everything from today. Stop the port-forward or minikube tunnel with Ctrl+C, then delete the application, Services and routing objects from their authoritative file: <code>kubectl delete -f shop.yaml</code>. To remove Envoy Gateway and its CRDs too, run <code>kubectl delete -f https://github.com/envoyproxy/gateway/releases/download/v1.9.2/install.yaml</code>.</li>
 </ol>
 
-<div class="trap"><b>Drill: spot the problems.</b> This Ingress should send everything for <code>fest.example.com</code> to the <code>site</code> Service, and everything under <code>/tickets</code> to the <code>tickets</code> Service. Both Services listen on port 80, and the controller's class is <code>nginx</code>. Find three errors.
-<pre><code>apiVersion: networking.k8s.io/v1
-kind: Ingress
+<div class="trap"><b>Drill: spot the problems.</b> This HTTPRoute should attach to the <code>fest</code> Gateway, send everything for <code>fest.example.com</code> to the <code>site</code> Service, and send everything under <code>/tickets</code> to the <code>tickets</code> Service. Both Services listen on port 80. Find three errors.
+<pre><code>apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata: { name: fest }
 spec:
+  parentRefs: [{ name: missing }]
+  hostnames: [fest.example.com]
   rules:
-  - host: fest.example.com
-    http:
-      paths:
-      - path: /tickets
-        pathType: Exact
-        backend: { service: { name: tickets, port: { number: 80 } } }
-      - path: /
-        pathType: Prefix
-        backend: { service: { name: fest-site, port: { number: 8080 } } }</code></pre>
+    - matches:
+        - path: { type: Exact, value: /tickets }
+      backendRefs: [{ name: tickets, port: 80 }]
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs: [{ name: fest-site, port: 8080 }]</code></pre>
 <details><summary>Show the answer</summary>
-<p>1. <b>No <code>ingressClassName: nginx</code></b>: unless <code>nginx</code> is the cluster's default class, no controller handles this Ingress, and every request gets 404. 2. <b><code>pathType: Exact</code> on <code>/tickets</code></b>: <code>/tickets/123</code> doesn't match, falls through to the <code>/</code> rule, and goes to the wrong Service. Use <code>Prefix</code>. 3. <b>The <code>/</code> backend is wrong</b>: the Service is called <code>site</code>, not <code>fest-site</code>, and it listens on 80, not 8080. NGINX would answer <code>503 Service Temporarily Unavailable</code> for every page. Fix both the name and the port.</p></details>
+<p>1. <b>Wrong parent</b>: <code>parentRefs</code> names <code>missing</code>, so this route does not attach to the <code>fest</code> Gateway. Use <code>name: fest</code>. 2. <b><code>type: Exact</code> on <code>/tickets</code></b>: <code>/tickets/123</code> does not match and falls through to the <code>/</code> rule. Use <code>PathPrefix</code>. 3. <b>The <code>/</code> backend is wrong</b>: the Service is called <code>site</code>, not <code>fest-site</code>, and it listens on 80, not 8080. Fix both the name and port. <code>kubectl describe httproute fest</code> and its status conditions help distinguish attachment and backend-reference failures.</p></details>
 </div>
 
 <h2>Practice questions</h2>
 
 <div class="practice-q recall">
 <p class="meta">5 marks · 9 minutes</p>
-<p>The Ingress below should send every request for <code>food.example.com</code> to the <code>frontend</code> Service, and requests under <code>/api</code> to the <code>orders-api</code> Service. Both Services listen on port 80; the ingress controller's class is <code>nginx</code>.</p>
-<pre><code>apiVersion: networking.k8s.io/v1
-kind: Ingress
+<p>The HTTPRoute below should attach to the <code>food</code> Gateway, send every request for <code>food.example.com</code> to the <code>frontend</code> Service, and send requests under <code>/api</code> to the <code>orders-api</code> Service. Both Services listen on port 80.</p>
+<pre><code>apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata: { name: food }
 spec:
-  ingressClassName: traefik
+  parentRefs: [{ name: shop }]
+  hostnames: [food.example.com]
   rules:
-  - host: food.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend: { service: { name: frontend, port: { number: 80 } } }
-      - path: /api
-        pathType: Exact
-        backend: { service: { name: orders, port: { number: 80 } } }</code></pre>
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs: [{ name: frontend, port: 80 }]
+    - matches:
+        - path: { type: Exact, value: /api }
+      backendRefs: [{ name: orders, port: 80 }]</code></pre>
 <ol class="asks">
 <li><span class="am">[3]</span>Detect any three errors, and state how to fix each.</li>
-<li><span class="am">[2]</span>Analyze why one Ingress is cheaper and simpler than giving each Service its own cloud load balancer.</li>
+<li><span class="am">[2]</span>Analyze why one shared Gateway is cheaper and simpler than giving each application Service its own cloud load balancer.</li>
 </ol>
 <textarea placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
-<li><b><code>ingressClassName: traefik</code>:</b> the cluster's controller is <code>nginx</code>, so no controller claims this Ingress: its rules are ignored, it gets no ADDRESS, and every request gets 404. Fix: <code>ingressClassName: nginx</code>.</li>
-<li><b><code>pathType: Exact</code> on <code>/api</code>:</b> only the exact path <code>/api</code> matches; <code>/api/orders/42</code> falls through to the <code>/</code> rule and goes to the frontend. Fix: <code>pathType: Prefix</code>.</li>
-<li><b>Backend name <code>orders</code>:</b> the Service is called <code>orders-api</code>. With no such Service, NGINX answers 503 for every API call. Fix: <code>name: orders-api</code>.</li>
-<li><b>Why one Ingress is cheaper and simpler:</b> a <code>LoadBalancer</code> Service creates one paid cloud load balancer per Service, each with its own address, TLS certificate and firewall rules. With an Ingress, only the controller has one load balancer; it routes by host and path to many internal ClusterIP Services. One address, one place for TLS and routing rules, and one bill instead of several.</li>
+<li><b>Wrong parent:</b> <code>parentRefs</code> names <code>shop</code>, but the required Gateway is <code>food</code>. The route is not attached to the intended listener. Fix: <code>name: food</code>.</li>
+<li><b><code>type: Exact</code> on <code>/api</code>:</b> only the exact path <code>/api</code> matches; <code>/api/orders/42</code> falls through to the <code>/</code> rule and goes to the frontend. Fix: <code>type: PathPrefix</code>.</li>
+<li><b>Backend name <code>orders</code>:</b> the Service is called <code>orders-api</code>. The route condition reports an unresolved backend reference, and API requests cannot be delivered. Fix: <code>name: orders-api</code>.</li>
+<li><b>Why one Gateway is cheaper and simpler:</b> with the usual cloud implementation, each application Service of type <code>LoadBalancer</code> requests its own external load balancer. A shared Gateway exposes one proxy fleet through one LoadBalancer Service and routes by hostname and path to many internal ClusterIP Services. That centralizes addresses, TLS and routing policy. Exact billing and whether load balancers can be shared are implementation-specific.</li>
 </ul>
-<p class="marking"><b>Marking (5):</b> any three errors, each with its fix 3 (1 each); why one Ingress is cheaper and simpler 2.</p>
+<p class="marking"><b>Marking (5):</b> any three errors, each with its fix 3 (1 each); why one Gateway is cheaper and simpler 2.</p>
 </details></div>
 
 <div class="practice-q recall">
@@ -215,8 +319,8 @@ spec:
 <ul>
 <li><b>kind / minikube:</b> nodes are containers or a VM on one machine; one command to create or delete; free; not highly available. Suits a <b>student's laptop</b>: quick practice that can be thrown away.</li>
 <li><b>kubeadm on VMs:</b> you install the runtime, run <code>kubeadm init</code> on the control plane and <code>kubeadm join</code> on the workers, and you run upgrades, certificates and etcd backups yourself. Suits a <b>training institute lab</b>: students see every part, and it runs on hardware they already have.</li>
-<li><b>Managed (AKS, EKS, GKE):</b> the cloud runs the control plane across availability zones, handles upgrades and backs up etcd; you choose and pay for the worker nodes. Suits <b>production</b>: availability and maintenance are handled, so the team spends its time on the app.</li>
-<li><b>kubeconfig and contexts:</b> <code>~/.kube/config</code> lists clusters (API server address and CA certificate), users (credentials) and contexts. A context is a named pair, “this cluster as this user, in this namespace”. The engineer has a <code>staging</code> and a <code>prod</code> context; kubectl uses the current one, <code>kubectl config use-context prod</code> switches, and <code>--context</code> runs one command against the other. Checking the current context before a <code>delete</code> stops accidents on prod.</li>
+<li><b>Managed (AKS, EKS, GKE):</b> the cloud operates the control plane and its etcd storage; the customer still plans Kubernetes upgrades and manages node pools, networking and add-ons. It suits <b>production</b> when reducing control-plane operations is worth the cloud cost.</li>
+<li><b>kubeconfig and contexts:</b> <code>~/.kube/config</code> lists clusters (API server address and CA certificate), users (credentials) and contexts. A context is a named combination of cluster, user and default namespace. The engineer has a <code>staging</code> and a <code>prod</code> context; kubectl uses the current one, <code>kubectl config use-context prod</code> switches, and <code>--context</code> runs one command against the other. Checking the current context before a <code>delete</code> stops accidents on prod.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> three options analysed and matched to the laptop, the lab and production 3 (1 each); kubeconfig and contexts 2.</p>
 </details></div>
@@ -354,11 +458,11 @@ $ kubectl get svc payments -o jsonpath='{.spec.selector}'
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking.</p>
 
-<div class="quiz" data-answer="1" data-explain="The Ingress object is just rules. A controller has to read them and route traffic. Without one (or with the wrong class), nothing happens.">
-<p class="q">1. You apply an Ingress in a fresh cluster and nothing answers. <code>kubectl get ingress</code> shows no ADDRESS. Most likely cause?</p>
+<div class="quiz" data-answer="1" data-explain="Gateway API objects are configuration. A matching Gateway controller must reconcile the GatewayClass and program a data plane such as Envoy Proxy.">
+<p class="q">1. You apply a Gateway and HTTPRoute in a fresh cluster, but the Gateway never becomes Programmed. Most likely cause?</p>
 <button>The Services are ClusterIP instead of NodePort</button>
-<button>There's no ingress controller (or the class doesn't match one)</button>
-<button>Ingress only works on cloud clusters</button>
+<button>There is no Gateway controller, or no controller matches the GatewayClass</button>
+<button>HTTPRoute only works on cloud clusters</button>
 <div class="fb"></div></div>
 
 <div class="quiz" data-answer="2" data-explain="The API server checks the quota when the Pod is created and refuses it. The Pod is never created, so it isn't Pending; the ReplicaSet's events show 'exceeded quota'.">
@@ -390,9 +494,9 @@ $ kubectl get svc payments -o jsonpath='{.spec.selector}'
 </div>
 
 <h2>Read next</h2>
-<p><b>Primary source:</b> <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">Ingress</a> (up to “Types of Ingress”), <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/">Resource Quotas</a>, and <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">Debug Pods</a>. About 30 minutes.</p>
+<p><b>Primary source:</b> <a href="https://gateway-api.sigs.k8s.io/guides/getting-started/">Gateway API: Getting started</a>, <a href="https://gateway.envoyproxy.io/docs/concepts/">Envoy Gateway concepts</a>, <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/">Resource Quotas</a>, and <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">Debug Pods</a>. About 35 minutes.</p>
 
-<div class="box">💬 <b>Stuck or curious?</b> Ask Claude, for example “what's the difference between Ingress and Gateway API?” or paste any <code>describe</code> output you can't read. Tell Claude how the drill went. Next, lesson 16 leaves Kubernetes for a bit: creating the cloud the cluster runs on, with Terraform.</div>
+<div class="box">💬 <b>Stuck or curious?</b> Ask Claude, for example “what is the difference between GatewayClass, Gateway and HTTPRoute?” or paste any <code>status.conditions</code> output you cannot read. Tell Claude how the drill went. Next, lesson 16 leaves Kubernetes for a bit: creating the cloud the cluster runs on, with Terraform.</div>
 
 <nav class="course"><a href="0014-data-jobs-scaling.html">← Lesson 14: Data, jobs &amp; scaling</a><a href="0016-terraform.html">Lesson 16: Infrastructure as code →</a></nav>
 </main><script src="../assets/quiz.js"></script></body></html>

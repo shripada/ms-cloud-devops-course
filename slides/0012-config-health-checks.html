@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Config &amp; Health Checks</title>
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="deck.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body>
+
+<!-- Arrowheads shared by every diagram -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="reveal"><div class="slides">
+
+<!-- ============ Title ============ -->
+<section class="title">
+  <div class="kicker">Module 2 · Lesson 12</div>
+  <h1>Config &amp;<br>health checks</h1>
+  <p class="sub">Keep settings out of your code, and let Kubernetes check if your app is working</p>
+  <aside class="notes">
+    Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
+    Two halves today: ConfigMaps and Secrets, then the three probes.
+  </aside>
+</section>
+
+<section>
+  <h2>One image, three places</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="One image fest-app:1.4 runs on your laptop, on a staging cluster and on a production cluster; each place gives the same two settings different values">
+    <rect class="svc" x="20" y="140" width="300" height="120" rx="12"/>
+    <text class="b" x="45" y="190">image</text>
+    <text class="m" x="45" y="228">fest-app:1.4</text>
+    <g class="fragment">
+      <path class="arrow" d="M322,180 C420,180 420,70 516,70"/>
+      <path class="arrow" d="M322,200 L516,200"/>
+      <path class="arrow" d="M322,220 C420,220 420,330 516,330"/>
+      <rect class="box" x="520" y="20" width="630" height="100" rx="12"/>
+      <text class="b" x="545" y="62">laptop <tspan class="s">· only you, while writing code</tspan></text>
+      <text class="m" x="545" y="96">LOG_LEVEL=debug<tspan x="800">DB_PASSWORD=dev123</tspan></text>
+      <rect class="box" x="520" y="150" width="630" height="100" rx="12"/>
+      <text class="b" x="545" y="192">staging <tspan class="s">· test cluster, only your team</tspan></text>
+      <text class="m" x="545" y="226">LOG_LEVEL=info<tspan x="800">DB_PASSWORD=stage42</tspan></text>
+      <rect class="box" x="520" y="280" width="630" height="100" rx="12"/>
+      <text class="b" x="545" y="322">production <tspan class="s">· real cluster, real users</tspan></text>
+      <text class="m" x="545" y="356">LOG_LEVEL=warn<tspan x="800">DB_PASSWORD=••••••</tspan></text>
+    </g>
+  </svg>
+  <p class="take">Same image everywhere. Only the settings change.</p>
+  <aside class="notes">
+    Three places, and staging and production are two separate clusters.
+    Staging is a copy where the team tries a new version first; production is the one real students use to buy fest tickets.
+    Same two settings in every box, different values. Bake them in and you need three images, and the production password sits inside every copy on Docker Hub.
+  </aside>
+</section>
+
+<section>
+  <h2>Running is not the same as ready</h2>
+  <p class="lead">Kubernetes only knows that the <b>process</b> is running.</p>
+  <p class="lead fragment">It can't tell if the app is:</p>
+  <ul class="lead">
+    <li class="fragment">stuck</li>
+    <li class="fragment">still loading</li>
+    <li class="fragment">ready for users</li>
+  </ul>
+  <p class="take">Probes are how you tell it.</p>
+  <aside class="notes">
+    Without probes, a rolling update (next lesson) sends users to Pods that can't answer yet.
+  </aside>
+</section>
+
+<!-- ============ 01 Config ============ -->
+<section class="divider">
+  <div class="num">01</div>
+  <h2>ConfigMaps &amp; Secrets</h2>
+  <p>Settings that live outside the image</p>
+</section>
+
+<section>
+  <h2>ConfigMap or Secret?</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>ConfigMap</h3>
+      <p>Normal settings anyone on the team may see</p>
+      <p><code>LOG_LEVEL</code><br><code>PAYMENT_GATEWAY_URL</code></p>
+    </div>
+    <div class="card bad fragment">
+      <h3>Secret</h3>
+      <p>Anything that would hurt if it leaked</p>
+      <p><code>DB_PASSWORD</code><br><code>UPI_API_KEY</code></p>
+    </div>
+  </div>
+  <p class="take">Both are small key–value objects. A Pod reads them as env vars or files.</p>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>A ConfigMap manifest</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="5-7">
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+  PAYMENT_GATEWAY_URL: https://pay.example.com
+</code></pre>
+    <div class="step">
+      <h3>data</h3>
+      <p>Each line is one key and its value, in plain text.</p>
+      <p>Safe to keep in Git with your other manifests.</p>
+    </div>
+  </div>
+<pre class="term" style="margin-top:28px"><span class="cmd">kubectl apply -f app-config.yaml</span>
+<span class="out">configmap/app-config <span class="ok">created</span></span></pre>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>A Secret manifest</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="5-7">
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+type: Opaque
+stringData:
+  DB_PASSWORD: Fest2026
+</code></pre>
+    <div class="step">
+      <h3>stringData</h3>
+      <p>You write plain text. The API server stores it as base64 under <code>data</code>.</p>
+    </div>
+  </div>
+  <p class="take">Name it <code>db-secret.local.yaml</code> and add it to <code>.gitignore</code>. Never commit it.</p>
+  <aside class="notes">
+    printf '%s\n' 'db-secret.local.yaml' &gt;&gt; .gitignore, then kubectl apply -f db-secret.local.yaml.
+  </aside>
+</section>
+
+<section>
+  <h2>base64 is not encryption</h2>
+<pre class="term big"><span class="cmd">kubectl get secret db-secret -o yaml</span>
+<span class="out">data:</span>
+<span class="out">  DB_PASSWORD: <span class="hi">RmVzdDIwMjY=</span></span></pre>
+<pre class="term big fragment"><span class="cmd">echo RmVzdDIwMjY= | base64 -d</span>
+<span class="bad">Fest2026</span></pre>
+  <p class="lead fragment">No key. No password. One command.</p>
+  <p class="take">What protects a Secret: who may read it (RBAC), encryption at rest in etcd (when configured), and keeping it out of Git.</p>
+  <aside class="notes">
+    base64 is just a way to write any bytes as plain letters. If you can read the Secret object, you can read the password.
+    The lesson uses kubectl get secret db-secret -o jsonpath='{.data.DB_PASSWORD}' | base64 -d.
+  </aside>
+</section>
+
+<section>
+  <h2>Feed the settings into the container</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="1-3|4-6|7-12" data-fragment-index="0">
+containers:
+  - name: app
+    image: busybox:1.36
+    envFrom:
+      - configMapRef:
+          name: app-config
+    env:
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: db-secret
+            key: DB_PASSWORD
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>The container</h3>
+        <p>Part of the <code>cfg</code> Deployment.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>envFrom</h3>
+        <p><b>Every</b> key in the ConfigMap becomes an env var.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>secretKeyRef</h3>
+        <p>Picks <b>one</b> key from the Secret.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    The demo app prints LOG_LEVEL, the URL and only the password's length. Never print a secret in logs.
+    kubectl logs deploy/cfg --tail=2 shows LOG_LEVEL=info and password_length=8.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Predict</div>
+  <p class="q">In <code>app-config.yaml</code> you change <code>LOG_LEVEL: info</code> to <code>debug</code> and apply it. Does the running app print <code>debug</code>?</p>
+  <div class="a fragment">No. Env vars are copied into the process <b>once</b>, when the container starts.</div>
+<pre class="term fragment" style="margin-top:24px"><span class="cmd">kubectl rollout restart deployment/cfg</span>
+<span class="cmd">kubectl logs deploy/cfg --tail=1</span>
+<span class="out">LOG_LEVEL=<span class="ok">debug</span> …</span></pre>
+  <aside class="notes">
+    Same as any Linux program: the environment is fixed at start.
+    A ConfigMap mounted as a file does update inside the Pod after a short delay, but the app still has to re-read it. Plan for a restart either way.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Break it</div>
+  <h2>Ask for a key that doesn't exist</h2>
+  <p>In <code>cfg.yaml</code>: <code>key: DB_PASSWORD</code> → <code>key: password</code></p>
+<pre class="term"><span class="cmd">kubectl get pods -l app=cfg</span>
+<span class="out">NAME              READY   STATUS</span>
+<span class="out">cfg-7c9d5-x1kqp   1/1     <span class="ok">Running</span></span>
+<span class="out">cfg-5b8f6-k2mzt   0/1     <span class="bad">CreateContainerConfigError</span></span></pre>
+<pre class="term wrap fragment"><span class="cmd">kubectl describe pod cfg-5b8f6-k2mzt</span>
+<span class="bad">couldn't find key password in Secret default/db-secret</span></pre>
+  <p class="take">The old Pod keeps running, so users are safe.</p>
+  <aside class="notes">
+    Put the key back to DB_PASSWORD, apply, then kubectl delete -f cfg.yaml.
+  </aside>
+</section>
+
+<!-- ============ 02 Probes ============ -->
+<section class="divider">
+  <div class="num">02</div>
+  <h2>Health checks</h2>
+  <p>Three probes the kubelet runs against your container</p>
+</section>
+
+<section>
+  <h2>Three probes</h2>
+  <table>
+    <tr><th>Probe</th><th>Asks</th><th>If it fails</th></tr>
+    <tr><td><code>livenessProbe</code></td><td>Is the app stuck?</td><td><b>Restart</b> the container</td></tr>
+    <tr class="fragment"><td><code>readinessProbe</code></td><td>Can it serve users now?</td><td><b>No traffic</b>, no restart</td></tr>
+    <tr class="fragment"><td><code>startupProbe</code></td><td>Has it finished starting?</td><td>The other two <b>wait</b></td></tr>
+  </table>
+  <aside class="notes">
+    Readiness failure removes the Pod from the Service's endpoints.
+    Startup: if it never passes within its budget, the container is restarted.
+  </aside>
+</section>
+
+<section>
+  <h2>The college canteen</h2>
+  <ul class="lead">
+    <li><b>Liveness:</b> is the cook awake?<br><span class="muted">No → replace the cook.</span></li>
+    <li class="fragment"><b>Readiness:</b> is food ready to serve?<br><span class="muted">No → don't send students to this counter yet.</span></li>
+    <li class="fragment"><b>Startup:</b> the dosa batter takes 40 minutes.<br><span class="muted">Don't ask “are you awake?” every 5 seconds till then.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2>In a real app</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-javascript" data-trim data-line-numbers="1-3|5-12" data-fragment-index="0">
+app.get('/healthz', (req, res) => {
+  res.send('ok');
+});
+
+app.get('/ready', async (req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.send('ready');
+  } catch {
+    res.status(503).send('db down');
+  }
+});
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Liveness: /healthz</h3>
+        <p>Checks only the app itself. Stuck app → no answer → restart.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="0">
+        <h3>Readiness: /ready</h3>
+        <p>Checks what it needs to serve, like the database. Fails → no traffic.</p>
+      </div>
+    </div>
+  </div>
+  <p class="take">The developers write these URLs into the app. The probe just calls them.</p>
+  <aside class="notes">
+    A Node.js/Express API, port 3000. The probe YAML is the same as in our demos: httpGet path /healthz, port 3000.
+    Never check the database in liveness: if the DB is down, restarting every Pod fixes nothing.
+    Frameworks give you these: Spring Boot /actuator/health/liveness and /readiness; Kubernetes' own API server has /livez and /readyz.
+    We can't make a real app hang on cue in class, so the next demo fakes the hang with nginx.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Simulate a hang</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="4|8|9-13" data-fragment-index="0">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness
+spec:
+  containers:
+    - name: app
+      image: nginx:1.27
+      livenessProbe:
+        httpGet:
+          path: /index.html
+          port: 80
+        periodSeconds: 3
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Name</h3>
+        <p>We chose <code>liveness</code>. Any name works.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
+        <h3>App</h3>
+        <p>Plain nginx. <code>/index.html</code> → <b class="ok">200</b>.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="1">
+        <h3>Probe</h3>
+        <p>Every 3 s, ask for <code>/index.html</code>.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    Same nginx the students already know. index.html stands in for the app's /healthz route from the last slide.
+    kubectl apply -f liveness.yaml, then kubectl get pod liveness: 1/1 Running, 0 restarts.
+  </aside>
+</section>
+
+<section>
+  <h2>Break it yourself</h2>
+<pre class="term big"><span class="cmd">kubectl exec liveness -- rm /usr/share/nginx/html/index.html</span>
+<span class="cmd">kubectl get pod liveness -w</span>
+<span class="out">NAME       READY   STATUS    RESTARTS</span>
+<span class="out">liveness   1/1     Running   0             <span class="cm">← at start</span></span>
+<span class="out">liveness   1/1     Running   <span class="bad">1 (2s ago)</span>    <span class="cm">← ~10 s later</span></span></pre>
+  <p class="lead">Same Pod. <code>-w</code> (<code>--watch</code>) adds a new line each time the Pod changes.</p>
+<pre class="term wrap big fragment"><span class="cmd">kubectl describe pod liveness</span>
+<span class="bad">Liveness probe failed: HTTP probe failed with statuscode: 404</span>
+<span class="out">Container app failed liveness probe, will be restarted</span></pre>
+  <p class="take">The process never crashed. The probe found it broken. The restart brought the file back.</p>
+  <aside class="notes">
+    -w never rewrites a line: line 1 is the state when you start watching, line 2 is printed when the restart happens. Real output also has an AGE column.
+    No file → nginx answers 404 → after 3 failures (about 9 s) the kubelet restarts the container.
+    A restart makes a fresh container from the image, so index.html is back: that's why restarting is the right fix for a stuck app.
+    RESTARTS stays at 1. Clean up: kubectl delete -f liveness.yaml.
+  </aside>
+</section>
+
+<section>
+  <h2>The slow-start trap</h2>
+  <p>App needs <b>30 s</b> to start. Liveness: start at 5 s, every 5 s, 3 failures allowed.</p>
+  <svg class="d" viewBox="0 0 1170 330" role="img" aria-label="Timeline: the app needs 30 seconds to start, but the liveness probe fails three times and kills it at about 15 seconds, so it starts again from zero">
+    <rect class="cp" x="80" y="30" width="874" height="60" rx="8"/>
+    <text class="b" x="100" y="70">app loading…</text>
+    <text class="b okt" x="910" y="125">ready</text>
+    <path class="axis" d="M80,160 L1110,160"/>
+    <path class="tick" d="M80,150 L80,170 M226,150 L226,170 M371,150 L371,170 M517,150 L517,170 M663,150 L663,170 M809,150 L809,170 M954,150 L954,170"/>
+    <text class="s" x="70" y="200">0 s</text>
+    <text class="s" x="214" y="200">5</text>
+    <text class="s" x="355" y="200">10</text>
+    <text class="s" x="501" y="200">15</text>
+    <text class="s" x="647" y="200">20</text>
+    <text class="s" x="793" y="200">25</text>
+    <text class="s" x="938" y="200">30</text>
+    <g class="fragment">
+      <text class="b badt big" x="214" y="250">✗</text>
+      <text class="b badt big" x="359" y="250">✗</text>
+      <text class="b badt big" x="505" y="250">✗</text>
+      <text class="s" x="214" y="285">probe fails: app not up yet</text>
+    </g>
+    <g class="fragment">
+      <rect x="600" y="20" width="370" height="80" style="fill:var(--bg);opacity:.75"/>
+      <path class="cross" d="M640,40 L700,80 M700,40 L640,80"/>
+      <text class="b badt" x="720" y="70">killed, starts again</text>
+    </g>
+  </svg>
+  <p class="take">Restarts forever → CrashLoopBackOff. The app is fine; the probe is wrong.</p>
+  <aside class="notes">
+    The lesson's slow.yaml: nginx with "sleep 30" before it starts. Liveness checks at 5, 10 and 15 s all fail, so it gives up at about 15 s.
+    kubectl get pods -l app=slow -w: restarts every ~15–20 s (the kill itself takes a moment), never 1/1.
+  </aside>
+</section>
+
+<section>
+  <h2>Fix: a startup probe</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="5-6">
+startupProbe:
+  httpGet:
+    path: /
+    port: 80
+  periodSeconds: 5
+  failureThreshold: 12
+</code></pre>
+    <div class="step">
+      <h3>Budget</h3>
+      <p class="lead">12 × 5 = <b>60 s</b> to start</p>
+      <p>Liveness and readiness don't run until it passes.</p>
+    </div>
+  </div>
+  <p class="fragment lead" style="margin-top:28px">Result: <code>0/1</code> for ~30 s, then <code>1/1</code>, <b class="ok">0 restarts</b>.</p>
+  <aside class="notes">
+    The lesson replaces the livenessProbe block with three probes: startup (budget 60 s), readiness on /ready every 5 s, liveness on / every 10 s.
+  </aside>
+</section>
+
+<section>
+  <h2>Readiness: out of traffic, not restarted</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="The Service slow sends traffic to two Pods; one Pod's readiness check fails, the EndpointSlice still lists it but marks it not ready, and it has zero restarts">
+    <rect class="svc" x="20" y="130" width="300" height="130" rx="12"/>
+    <text class="b" x="45" y="180">Service slow</text>
+    <text class="s" x="45" y="215">EndpointSlice:</text>
+    <g class="fragment fade-out" data-fragment-index="0">
+      <text class="m" x="45" y="243">2 endpoints, 2 ready</text>
+    </g>
+    <rect class="pod" x="760" y="30" width="390" height="120" rx="12"/>
+    <text class="b" x="785" y="78">Pod A</text>
+    <text class="m okt" x="785" y="118">1/1 ready</text>
+    <path class="link" d="M322,170 L756,90"/>
+    <g class="fragment fade-out" data-fragment-index="0">
+      <path class="link" d="M322,220 L756,300"/>
+    </g>
+    <rect class="pod" x="760" y="240" width="390" height="120" rx="12"/>
+    <text class="b" x="785" y="288">Pod B</text>
+    <g class="fragment fade-out" data-fragment-index="0">
+      <text class="m okt" x="785" y="328">1/1 ready</text>
+    </g>
+    <g class="fragment" data-fragment-index="0">
+      <text class="m badt" x="785" y="328">0/1  RESTARTS 0</text>
+      <text class="s" x="440" y="370">/ready file deleted: readiness fails</text>
+      <text class="m acc" x="45" y="243">2 endpoints, 1 ready</text>
+    </g>
+  </svg>
+  <p class="take">Readiness fails → no traffic. Liveness fails → restart.</p>
+  <aside class="notes">
+    kubectl exec $POD -- rm /usr/share/nginx/html/ready, wait 20 s, then compare kubectl get pods and kubectl describe endpointslices: that Pod's endpoint shows Ready: false.
+    Put the file back and the Pod rejoins. Like a Pod that lost its database connection: don't kill it, just stop sending users.
+  </aside>
+</section>
+
+<!-- ============ Check ============ -->
+<section class="divider">
+  <div class="num">?</div>
+  <h2>Check yourself</h2>
+  <p>Answer first, then click</p>
+</section>
+
+<section>
+  <div class="kicker">Check 1</div>
+  <p class="q">A teammate says: “It's safe to commit the Secret YAML to Git, the password is encrypted.” What's wrong?</p>
+  <div class="a fragment">The value is only base64-encoded. Anyone runs <code>base64 -d</code> and reads it, no key needed.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 2</div>
+  <p class="q">A Pod's <em>readiness</em> probe starts failing. What does Kubernetes do?</p>
+  <div class="a fragment">Removes it from the Service's endpoints, so it gets no traffic. It does <b>not</b> restart it.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 3</div>
+  <p class="q">You change <code>LOG_LEVEL</code> in a ConfigMap that a Deployment reads with <code>envFrom</code>. What happens to the running Pods?</p>
+  <div class="a fragment">Nothing, until they restart. Run <code>kubectl rollout restart</code>.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 4</div>
+  <p class="q">An app needs 90 seconds to start, then should be restarted quickly if it hangs. Which probe solves the slow start?</p>
+  <div class="a fragment">A startup probe with a budget over 90 s, e.g. <code>periodSeconds: 10</code>, <code>failureThreshold: 12</code>. Keep liveness for later hangs.</div>
+</section>
+
+<section>
+  <div class="kicker">Check 5</div>
+  <p class="q">Liveness: start at 10 s, every 5 s, 2 failures allowed. The app needs 45 s to load. What happens?</p>
+  <div class="a fragment">Checks at 10 s and 15 s both fail, so it's killed at about 15 s, long before 45 s. It restarts forever: CrashLoopBackOff. Add a startup probe.</div>
+</section>
+
+<section class="title">
+  <div class="kicker">Read next</div>
+  <h2>Do it yourself</h2>
+  <ul>
+    <li><a href="../lessons/0012-config-health-checks.html">Lesson 12: Config &amp; health checks</a></li>
+    <li><a href="0013-updates-releases.html">Next deck: Updates &amp; releases</a></li>
+  </ul>
+</section>
+
+</div></div>
+
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="vendor/reveal/plugin/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    center: false,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealNotes, RevealHighlight],
+    keyboard: {
+      // T cycles the course theme: system → light → dark
+      84: function () {
+        var btn = document.querySelector('.theme-toggle');
+        if (btn) btn.click();
+      }
+    }
+  });
+</script>
+</body>
+</html>

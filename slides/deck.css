@@ -51,7 +51,7 @@ html,body,.reveal-viewport{background:var(--bg);color:var(--fg)}
 .reveal .muted{color:var(--muted)}
 .reveal .kicker{font:600 20px "JetBrains Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
 .reveal :not(pre)>code{white-space:nowrap}
-.reveal code{font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--code-bg);padding:.05em .3em;border-radius:4px}
+.reveal code{font-variant-ligatures:none;font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--code-bg);padding:.05em .3em;border-radius:4px}
 
 /* One-line takeaway pinned to the bottom of a slide */
 .reveal .take{position:absolute;left:56px;right:56px;bottom:34px;margin:0;padding:12px 18px;
@@ -153,3 +153,17 @@ html,body,.reveal-viewport{background:var(--bg);color:var(--fg)}
 .reveal pre.yaml{position:relative}
 .reveal pre.yaml code.hljs{font-size:20px;line-height:1.28;padding:10px 8px;white-space:pre}
 .reveal pre.yaml.big code.hljs{font-size:27px}
+
+/* Added for the lessons 12-15 decks */
+.reveal .lead{font-size:36px;line-height:1.35}
+.reveal .huge{font:600 64px "JetBrains Mono",monospace;color:var(--accent);margin:.2em 0 .3em}
+.reveal pre.term.wrap{white-space:pre-wrap}
+.reveal pre.term.big{font-size:26px}
+.reveal .cols.three{grid-template-columns:1fr 1fr 1fr;gap:28px}
+.d .pod.wait{stroke-dasharray:9 6}
+.d .bad{fill:var(--panel);stroke:var(--bad);stroke-width:3}
+.d .okbox{fill:var(--pod);stroke:var(--ok);stroke-width:4}
+.d text.big{font-size:30px}
+.d text.huge{font-family:"JetBrains Mono",monospace;font-size:64px;font-weight:600;fill:var(--accent)}
+.d .axis{stroke:var(--line);stroke-width:3}
+.d .tick{stroke:var(--line);stroke-width:2}

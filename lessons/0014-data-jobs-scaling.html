@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Data, jobs and scaling</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
-<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 14</div>
+<div class="kicker"><a href="../index.html">Course home</a> · Module 2 · Lesson 14 · <a href="../slides/0014-data-jobs-scaling.html">Slides</a></div>
 <h1>Data, jobs &amp; scaling</h1>
 
 <h2>Why this matters for DevOps</h2>
@@ -8,7 +8,7 @@
 
 <h2>Three ideas, no more</h2>
 <p><b>emptyDir vs PersistentVolumeClaim</b>: an <code>emptyDir</code> volume is a scratch folder that lives exactly as long as the Pod. Delete the Pod and it's gone. A <em>PersistentVolumeClaim</em> (PVC) is a request: “I need 1 GiB of disk”. The cluster's <em>StorageClass</em> creates a real disk (a PersistentVolume) for it, which lives on after the Pod. <code>ReadWriteOnce</code> means only one node can mount that disk at a time, which is what a normal cloud disk like AWS EBS allows. <a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/">[Kubernetes docs: Persistent Volumes]</a></p>
-<p><b>Job and CronJob</b>: a Deployment keeps Pods running forever. A <em>Job</em> runs a Pod until it <em>finishes</em> successfully. A <em>CronJob</em> creates a Job on a schedule, written in the same format as Linux <code>cron</code>: <code>0 2 * * *</code> means 02:00 every day. Three settings matter: <code>restartPolicy</code> (retry in the same Pod, <code>OnFailure</code>, or never, <code>Never</code>), <code>backoffLimit</code> (how many retries before the Job is marked failed), and <code>concurrencyPolicy</code> (what to do if the last run is still going when the next is due). <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">[Kubernetes docs: CronJob]</a></p>
+<p><b>Job and CronJob</b>: a Deployment keeps Pods running forever. A <em>Job</em> runs a Pod until it <em>finishes</em> successfully. A <em>CronJob</em> creates a Job on a schedule, written in the same format as Linux <code>cron</code>: <code>0 2 * * *</code> means 02:00 every day, by the cluster's clock unless you set <code>timeZone</code>, for example <code>timeZone: "Asia/Kolkata"</code>. Three settings matter: <code>restartPolicy</code> (retry in the same Pod, <code>OnFailure</code>, or never, <code>Never</code>), <code>backoffLimit</code> (how many retries before the Job is marked failed), and <code>concurrencyPolicy</code> (what to do if the last run is still going when the next is due). <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">[Kubernetes docs: CronJob]</a></p>
 <p><b>HorizontalPodAutoscaler (HPA)</b>: a controller that changes a Deployment's <code>replicas</code> to keep average CPU near a target. It reads CPU from <em>metrics-server</em> and works in <em>percent of the CPU request</em>, so a Pod with no CPU request can't be measured at all. <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">[Kubernetes docs: HPA]</a></p>
 <p class="aside">Your hostel room is a PVC: you go home for the holidays (the Pod is deleted) and your books are still there when you come back. A train's sleeper berth is an <code>emptyDir</code>: get off, and whatever you left behind is gone. The HPA is the canteen manager who opens a second counter when the queue gets long, and closes it after lunch.</p>
 
@@ -19,7 +19,15 @@
 
 <h2>Do it: data that survives</h2>
 <ol class="steps">
-<li>First, the wrong way. Create a password Secret and a PostgreSQL Deployment that uses <code>emptyDir</code>. Create <code>db.yaml</code>:
+<li>First, the wrong storage setup. Keep the password in a local manifest that is excluded from Git. Create <code>db-secret.local.yaml</code>:
+<pre><code>apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: Orders2026</code></pre>
+Add <code>db-secret.local.yaml</code> to <code>.gitignore</code>. Then create <code>db.yaml</code> with a PostgreSQL Deployment that uses <code>emptyDir</code>:
 <pre><code>apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,7 +57,8 @@ spec:
       volumes:
         - name: data
           emptyDir: {}</code></pre>
-<pre><code>kubectl create secret generic db-secret --from-literal=POSTGRES_PASSWORD=Orders2026
+<pre><code>printf '%s\n' 'db-secret.local.yaml' &gt;&gt; .gitignore
+kubectl apply -f db-secret.local.yaml
 kubectl apply -f db.yaml
 kubectl rollout status deployment/db</code></pre>
 The password comes from a Secret (lesson 12), the image has a fixed version, and <code>PGDATA</code> points at a sub-folder, which PostgreSQL needs when the mount is a fresh disk.</li>
@@ -107,16 +116,17 @@ kubectl get jobs -w</code></pre>
 Wait three minutes. A new Job is due every minute, but you never see two running together: with <code>Forbid</code>, a run that's due while the last is still going is <em>skipped</em>. With <code>Allow</code> (the default), two backups would run together and fight over the same files. <code>Replace</code> would kill the old one and start the new one.</li>
 <li>Make the backup fail. Change the command to <code>["sh", "-c", "echo disk full; exit 1"]</code> and <code>restartPolicy</code> to <code>Never</code>, apply, and wait for the next run:
 <pre><code>kubectl get pods -w</code></pre>
-With <code>Never</code>, each failure makes a <em>new</em> Pod, so you can read every failed run's logs. After the first try plus <code>backoffLimit: 2</code> retries (3 Pods), the Job is marked <code>Failed</code> and stops. <code>kubectl describe job</code> shows <code>BackoffLimitExceeded</code>. That's the event you'd alert on at work. Clean up: <code>kubectl delete -f backup.yaml</code> and <code>kubectl delete -f db.yaml</code> (this deletes the PVC and its data too), then <code>kubectl delete secret db-secret</code>.</li>
+With <code>Never</code>, each failure makes a <em>new</em> Pod, so you can read every failed run's logs. After the first try plus <code>backoffLimit: 2</code> retries (3 Pods), the Job is marked <code>Failed</code> and stops. <code>kubectl describe job</code> shows <code>BackoffLimitExceeded</code>. That's the event you'd alert on at work. Before cleanup, inspect <code>kubectl get pv</code> and its <code>RECLAIM POLICY</code>. Deleting the PVC deletes its backing storage when that policy is <code>Delete</code>; with <code>Retain</code>, the volume and data remain for manual recovery. Now run <code>kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml</code>.</li>
 </ol>
 
 <h2>Do it: autoscaling</h2>
 <ol class="steps" start="8">
 <li>The HPA needs metrics-server. Check if you have it: <code>kubectl top nodes</code>. If you get <code>Metrics API not available</code>, install it, and on a laptop cluster tell it to trust the kubelets' self-signed certificates:
-<pre><code>kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+<pre><code>kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
 kubectl patch -n kube-system deployment metrics-server --type=json \
   -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 kubectl rollout status -n kube-system deployment/metrics-server</code></pre>
+Metrics Server 0.9.x supports Kubernetes 1.34 and newer. If <code>kubectl version</code> reports Kubernetes 1.31–1.33, use the pinned <code>v0.8.1</code> components manifest instead.
 After a minute, <code>kubectl top nodes</code> prints CPU and memory per node.</li>
 <li>Deploy a CPU-hungry app (from the Kubernetes docs) with a CPU request, and an HPA. Create <code>hpa.yaml</code>:
 <pre><code>apiVersion: apps/v1
@@ -124,7 +134,6 @@ kind: Deployment
 metadata:
   name: php-apache
 spec:
-  replicas: 1
   selector:
     matchLabels: { app: php-apache }
   template:
@@ -165,7 +174,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: 50</code></pre>
-<code>200m</code> means 200 millicores, a fifth of one CPU. 50% utilisation means “aim for 100m per Pod on average”.
+<code>200m</code> means 200 millicores, a fifth of one CPU. 50% utilisation means “aim for 100m per Pod on average”. The Deployment omits <code>replicas</code>: it initially defaults to 1, then the HPA owns that field. Keeping a fixed replica count in a repeatedly applied manifest would fight the autoscaler.
 <pre><code>kubectl apply -f hpa.yaml
 kubectl get hpa php-apache -w</code></pre>
 After a minute, <code>TARGETS</code> shows about <code>cpu: 0%/50%</code>.</li>
