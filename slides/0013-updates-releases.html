@@ -7,6 +7,13 @@
 <link rel="stylesheet" href="vendor/reveal/reset.css">
 <link rel="stylesheet" href="vendor/reveal/reveal.css">
 <link rel="stylesheet" href="deck.css">
+<style>
+  /* Blue-green and canary: draw "blue" things blue and "green" things green */
+  .d .blue{fill:var(--svc);stroke:var(--svc-line);stroke-width:3}
+  .d .green{fill:var(--pod);stroke:var(--pod-line);stroke-width:3}
+  .d text.bluet{fill:var(--svc-line)}
+  .d text.greent{fill:var(--pod-line)}
+</style>
 <script src="../assets/theme.js"></script>
 </head>
 <body>
@@ -33,14 +40,15 @@
 </section>
 
 <section>
-  <h2>IRCTC, 10 a.m., Tatkal opens</h2>
+  <h2>Upgrade IRCTC while Tatkal opens</h2>
+  <p class="lead">10 a.m.: Tatkal booking opens and lakhs of users are clicking. The team must ship a <b>new version</b> right now.</p>
+  <p class="fragment">Stop all old Pods, then start new ones → <b>every user sees errors</b>. So the upgrade must:</p>
   <ul class="lead">
-    <li>No “site down for 10 minutes, we're deploying”</li>
     <li class="fragment">Replace old Pods a <b>few at a time</b></li>
-    <li class="fragment">Send traffic to a new Pod only when it's <b>ready</b></li>
+    <li class="fragment">Send users to a new Pod only when it's <b>ready</b></li>
     <li class="fragment">Keep a <b>one-command way back</b></li>
   </ul>
-  <p class="take">A Deployment's rollout does all three, if you set it up right.</p>
+  <p class="take fragment">A Deployment's rolling update gives all three, if you set it up right.</p>
   <aside class="notes">Real teams ship many times a day, while users keep clicking.</aside>
 </section>
 
@@ -52,11 +60,15 @@
 </section>
 
 <section>
-  <h2>A rollout makes a new ReplicaSet</h2>
-  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Deployment who owns an old ReplicaSet with image v1.10 and a new ReplicaSet with image v1.11; the new one scales up to 4 Pods and the old one is kept at 0">
+  <h2>A new image makes a new ReplicaSet</h2>
+  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="You change the image of Deployment who to v1.11. The Deployment makes a new ReplicaSet with 4 v1.11 Pods; the old ReplicaSet with v1.10 drops to 0 Pods but is kept for rollback">
     <rect class="svc" x="10" y="150" width="250" height="110" rx="12"/>
     <text class="b" x="35" y="195">Deployment</text>
     <text class="m" x="35" y="232">who</text>
+    <g class="fragment" data-fragment-index="0">
+      <text class="m acc" x="10" y="300">you change</text>
+      <text class="m acc" x="10" y="328">image → v1.11</text>
+    </g>
     <path class="arrow" d="M262,190 C320,190 320,95 376,95"/>
     <rect class="cp" x="380" y="30" width="330" height="130" rx="12"/>
     <text class="b" x="405" y="72">old ReplicaSet</text>
@@ -65,13 +77,17 @@
       <text class="b" x="405" y="140">4 Pods</text>
     </g>
     <g class="fragment" data-fragment-index="1">
-      <text class="b acc" x="405" y="140">0 Pods, kept</text>
+      <text class="b acc" x="405" y="140">0 Pods</text>
     </g>
-    <g class="fragment semi-fade-out" data-fragment-index="1">
-      <rect class="pod" x="760" y="50" width="80" height="80" rx="8"/>
-      <rect class="pod" x="855" y="50" width="80" height="80" rx="8"/>
-      <rect class="pod" x="950" y="50" width="80" height="80" rx="8"/>
-      <rect class="pod" x="1045" y="50" width="80" height="80" rx="8"/>
+    <g class="fragment fade-out" data-fragment-index="1">
+      <rect class="pod" x="740" y="50" width="95" height="80" rx="8"/><text class="m" x="756" y="97">v1.10</text>
+      <rect class="pod" x="845" y="50" width="95" height="80" rx="8"/><text class="m" x="861" y="97">v1.10</text>
+      <rect class="pod" x="950" y="50" width="95" height="80" rx="8"/><text class="m" x="966" y="97">v1.10</text>
+      <rect class="pod" x="1055" y="50" width="95" height="80" rx="8"/><text class="m" x="1071" y="97">v1.10</text>
+    </g>
+    <g class="fragment" data-fragment-index="1">
+      <text class="b acc" x="740" y="85">not deleted:</text>
+      <text class="b acc" x="740" y="120">kept for rollback</text>
     </g>
     <g class="fragment" data-fragment-index="0">
       <path class="arrow acc" d="M262,220 C320,220 320,315 376,315"/>
@@ -79,22 +95,29 @@
       <text class="b" x="405" y="292">new ReplicaSet</text>
       <text class="m acc" x="405" y="326">image v1.11</text>
     </g>
+    <g class="fragment fade-out" data-fragment-index="1">
+      <g class="fragment" data-fragment-index="0">
+        <text class="b" x="405" y="360">0 Pods</text>
+      </g>
+    </g>
     <g class="fragment" data-fragment-index="1">
       <text class="b" x="405" y="360">4 Pods</text>
-      <rect class="pod" x="760" y="270" width="80" height="80" rx="8" style="stroke:var(--accent)"/>
-      <rect class="pod" x="855" y="270" width="80" height="80" rx="8" style="stroke:var(--accent)"/>
-      <rect class="pod" x="950" y="270" width="80" height="80" rx="8" style="stroke:var(--accent)"/>
-      <rect class="pod" x="1045" y="270" width="80" height="80" rx="8" style="stroke:var(--accent)"/>
+      <rect class="pod" x="740" y="270" width="95" height="80" rx="8" style="stroke:var(--accent)"/><text class="m acc" x="756" y="317">v1.11</text>
+      <rect class="pod" x="845" y="270" width="95" height="80" rx="8" style="stroke:var(--accent)"/><text class="m acc" x="861" y="317">v1.11</text>
+      <rect class="pod" x="950" y="270" width="95" height="80" rx="8" style="stroke:var(--accent)"/><text class="m acc" x="966" y="317">v1.11</text>
+      <rect class="pod" x="1055" y="270" width="95" height="80" rx="8" style="stroke:var(--accent)"/><text class="m acc" x="1071" y="317">v1.11</text>
     </g>
   </svg>
-  <p class="take">The old ReplicaSet stays at 0 (the last 10 are kept by default). Rollback = scale it back up.</p>
+  <p class="take fragment">Rollback = scale the old ReplicaSet back up.</p>
   <aside class="notes">
-    Click 1: you change the image; a new ReplicaSet appears. Click 2: new scales up, old scales down to 0 but is not deleted. revisionHistoryLimit (default 10) sets how many old ReplicaSets are kept.
+    Click 1: you change the image; a new ReplicaSet appears with 0 Pods. Click 2: new scales up to 4, old scales down to 0 but is not deleted.
+    revisionHistoryLimit (default 10) sets how many old ReplicaSets are kept.
   </aside>
 </section>
 
 <section>
   <h2>What starts a rollout?</h2>
+  <p class="muted">Pod template = the <code>template:</code> block, what every Pod looks like.</p>
   <div class="cols">
     <div class="card good">
       <h3>Pod template changes</h3>
@@ -107,59 +130,66 @@
       <p><b>→ same ReplicaSet, more or fewer Pods</b></p>
     </div>
   </div>
-  <p class="take">No template change, no rollout.</p>
+  <p class="take fragment">No template change, no rollout.</p>
   <aside class="notes">This answers lesson 11's stretch question.</aside>
 </section>
 
 <section>
-  <h2>Two dials</h2>
+  <h2>Two settings control each round</h2>
   <p class="muted">With <code>replicas: 4</code>:</p>
   <table>
-    <tr><th>Setting</th><th>Means</th><th>Value 1 / 0 gives</th></tr>
-    <tr><td><code>maxSurge: 1</code></td><td>Extra Pods allowed above <code>replicas</code></td><td>At most <b>5</b> Pods</td></tr>
-    <tr class="fragment"><td><code>maxUnavailable: 0</code></td><td>Wanted Pods allowed to be not ready</td><td>Never fewer than <b>4</b> ready</td></tr>
+    <tr><th>Setting</th><th>Plain meaning</th><th>Result</th></tr>
+    <tr><td><code>maxSurge: 1</code></td><td>Up to 1 <b>extra</b> Pod during the update</td><td>At most <b>5</b> Pods</td></tr>
+    <tr class="fragment"><td><code>maxUnavailable: 0</code></td><td><b>No</b> Pod may be missing or not ready</td><td>Always <b>4</b> ready</td></tr>
   </table>
-  <p class="take">“Ready” means the readiness probe from lesson 12 passed.</p>
+  <p class="fragment" style="margin-top:20px">Bigger numbers → faster update, but less spare room if the new version is bad.</p>
+  <p class="take fragment">“Ready” = the readiness probe from lesson 12 passed.</p>
 </section>
 
 <section>
-  <h2>One step of the rollout</h2>
-  <svg class="d" viewBox="0 0 1170 440" role="img" aria-label="Step 1: 4 old Pods plus 1 new Pod that is not ready yet. Step 2: the new Pod becomes ready. Step 3: one old Pod is removed. Repeat until all 4 are new">
-    <text class="b" x="10" y="85">1 · start one</text>
-    <rect class="pod" x="250" y="40" width="140" height="80" rx="10"/><text class="m" x="275" y="88">v1.10</text>
-    <rect class="pod" x="410" y="40" width="140" height="80" rx="10"/><text class="m" x="435" y="88">v1.10</text>
-    <rect class="pod" x="570" y="40" width="140" height="80" rx="10"/><text class="m" x="595" y="88">v1.10</text>
-    <rect class="pod" x="730" y="40" width="140" height="80" rx="10"/><text class="m" x="755" y="88">v1.10</text>
-    <rect class="pod wait" x="890" y="40" width="140" height="80" rx="10" style="stroke:var(--accent)"/><text class="m acc" x="915" y="78">v1.11</text><text class="s" x="915" y="104">not ready</text>
-    <text class="b" x="1050" y="88">5 Pods</text>
+  <h2>Each round: add one, wait, remove one</h2>
+  <svg class="d" viewBox="0 0 1170 430" role="img" aria-label="Round of a rolling update with 4 replicas. 1: a fifth Pod with v1.11 starts, not ready: 5 Pods, 4 ready. 2: it becomes ready: 5 Pods, 5 ready. 3: one v1.10 Pod is removed: 4 Pods, 4 ready. Repeat until all 4 are v1.11">
+    <text class="b" x="10" y="67">1 · add one new</text>
+    <rect class="pod" x="230" y="20" width="120" height="80" rx="10"/><text class="m" x="258" y="67">v1.10</text>
+    <rect class="pod" x="365" y="20" width="120" height="80" rx="10"/><text class="m" x="393" y="67">v1.10</text>
+    <rect class="pod" x="500" y="20" width="120" height="80" rx="10"/><text class="m" x="528" y="67">v1.10</text>
+    <rect class="pod" x="635" y="20" width="120" height="80" rx="10"/><text class="m" x="663" y="67">v1.10</text>
+    <rect class="pod wait" x="770" y="20" width="120" height="80" rx="10" style="stroke:var(--accent)"/><text class="m acc" x="798" y="55">v1.11</text><text class="s" x="788" y="84">not ready</text>
+    <text class="b" x="915" y="67">5 Pods, 4 ready</text>
     <g class="fragment">
-      <text class="b" x="10" y="235">2 · it's ready</text>
-      <rect class="pod" x="250" y="190" width="140" height="80" rx="10"/><text class="m" x="275" y="238">v1.10</text>
-      <rect class="pod" x="410" y="190" width="140" height="80" rx="10"/><text class="m" x="435" y="238">v1.10</text>
-      <rect class="pod" x="570" y="190" width="140" height="80" rx="10"/><text class="m" x="595" y="238">v1.10</text>
-      <rect class="pod" x="730" y="190" width="140" height="80" rx="10"/><text class="m" x="755" y="238">v1.10</text>
-      <rect class="pod" x="890" y="190" width="140" height="80" rx="10" style="stroke:var(--accent);stroke-width:5"/><text class="m acc" x="915" y="228">v1.11</text><text class="s okt" x="915" y="254">ready</text>
+      <text class="b" x="10" y="197">2 · wait: ready</text>
+      <rect class="pod" x="230" y="150" width="120" height="80" rx="10"/><text class="m" x="258" y="197">v1.10</text>
+      <rect class="pod" x="365" y="150" width="120" height="80" rx="10"/><text class="m" x="393" y="197">v1.10</text>
+      <rect class="pod" x="500" y="150" width="120" height="80" rx="10"/><text class="m" x="528" y="197">v1.10</text>
+      <rect class="pod" x="635" y="150" width="120" height="80" rx="10"/><text class="m" x="663" y="197">v1.10</text>
+      <rect class="pod" x="770" y="150" width="120" height="80" rx="10" style="stroke:var(--accent);stroke-width:5"/><text class="m acc" x="798" y="185">v1.11</text><text class="s okt" x="802" y="214">ready</text>
+      <text class="b" x="915" y="197">5 Pods, 5 ready</text>
     </g>
     <g class="fragment">
-      <text class="b" x="10" y="385">3 · remove one old</text>
+      <text class="b" x="10" y="327">3 · remove old</text>
       <g class="dim">
-        <rect class="pod" x="250" y="340" width="140" height="80" rx="10"/><text class="m" x="275" y="388">v1.10</text>
+        <rect class="pod" x="230" y="280" width="120" height="80" rx="10"/><text class="m" x="258" y="327">v1.10</text>
       </g>
-      <path class="cross" d="M270,350 L370,410 M370,350 L270,410"/>
-      <rect class="pod" x="410" y="340" width="140" height="80" rx="10"/><text class="m" x="435" y="388">v1.10</text>
-      <rect class="pod" x="570" y="340" width="140" height="80" rx="10"/><text class="m" x="595" y="388">v1.10</text>
-      <rect class="pod" x="730" y="340" width="140" height="80" rx="10"/><text class="m" x="755" y="388">v1.10</text>
-      <rect class="pod" x="890" y="340" width="140" height="80" rx="10" style="stroke:var(--accent);stroke-width:5"/><text class="m acc" x="915" y="388">v1.11</text>
-      <text class="b acc" x="1050" y="388">repeat</text>
+      <path class="cross" d="M250,290 L330,350 M330,290 L250,350"/>
+      <rect class="pod" x="365" y="280" width="120" height="80" rx="10"/><text class="m" x="393" y="327">v1.10</text>
+      <rect class="pod" x="500" y="280" width="120" height="80" rx="10"/><text class="m" x="528" y="327">v1.10</text>
+      <rect class="pod" x="635" y="280" width="120" height="80" rx="10"/><text class="m" x="663" y="327">v1.10</text>
+      <rect class="pod" x="770" y="280" width="120" height="80" rx="10" style="stroke:var(--accent);stroke-width:5"/><text class="m acc" x="798" y="327">v1.11</text>
+      <text class="b" x="915" y="327">4 Pods, 4 ready</text>
+    </g>
+    <g class="fragment">
+      <text class="b acc" x="230" y="410">Repeat 4 times, until all 4 Pods are v1.11.</text>
     </g>
   </svg>
-  <p class="take">At most 5 Pods, never fewer than 4 ready. Four rounds and it's done.</p>
+  <p class="take fragment">Never more than 5 Pods, never fewer than 4 ready.</p>
 </section>
 
 <section>
   <div class="kicker">Try it</div>
-  <h2>Set the strategy in who.yaml</h2>
-  <div class="cols wide-left">
+  <h2>Set the strategy and a probe in who.yaml</h2>
+  <div class="cols">
+    <div>
+      <p class="step"><b>Under <code>spec:</code></b>, next to <code>replicas</code>:</p>
 <pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="3-7">
 spec:
   replicas: 4
@@ -169,129 +199,84 @@ spec:
       maxSurge: 1
       maxUnavailable: 0
 </code></pre>
-    <div class="step">
-      <h3>Plus a readiness probe</h3>
-      <p>on the container, next to <code>ports</code>.</p>
-      <p>Without it, “ready” just means “started”.</p>
+    </div>
+    <div class="fragment">
+      <p class="step"><b>Under the container</b>, next to <code>ports:</code>:</p>
+<pre class="yaml big"><code class="language-yaml" data-trim>
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+  periodSeconds: 2
+</code></pre>
     </div>
   </div>
+  <p class="take fragment">Without the probe, “ready” just means “started”.</p>
   <aside class="notes">
-    Readiness probe in the lesson: httpGet path / port 80, periodSeconds: 2. Start from image traefik/whoami:v1.10.
+    Start from image traefik/whoami:v1.10. Apply, then kubectl get rs -l app=who: one ReplicaSet with 4 Pods.
   </aside>
 </section>
 
 <section>
   <div class="kicker">Try it</div>
   <h2>Ship version 1.11</h2>
-<pre class="term"><span class="cm"># who.yaml: image v1.10 → v1.11</span>
-<span class="cmd">kubectl apply -f who.yaml</span>
-<span class="cmd">kubectl rollout status deployment/who</span>
-<span class="out">deployment "who" <span class="ok">successfully rolled out</span></span>
-<span class="cmd">kubectl get rs -l app=who</span>
-<span class="out">NAME             DESIRED   CURRENT   READY</span>
-<span class="out"><span class="hi">who-7d9f8c6b5</span>    4         4         4       <span class="cm"># new</span></span>
-<span class="out">who-5c6b7d8f9    0         0         0       <span class="cm"># old, kept</span></span></pre>
-  <p class="take">Predict first: at the busiest moment, how many Pods? How many ready?</p>
+  <p>Terminal 2 watches: <code>kubectl get pods -l app=who -w</code></p>
+  <p>Terminal 1: change the image in who.yaml to <code>v1.11</code>, then <code>kubectl apply -f who.yaml</code></p>
+  <p class="lead fragment"><b>Predict:</b> at the busiest moment, how many Pods? How many ready?</p>
+<pre class="term fragment"><span class="cm"># terminal 2</span>
+<span class="out">who-7d9f8c6b5-k8x2p   0/1   ContainerCreating   <span class="cm"># new: the 5th Pod</span></span>
+<span class="out">who-7d9f8c6b5-k8x2p   1/1   <span class="ok">Running</span>             <span class="cm"># new is ready</span></span>
+<span class="out">who-5c6b7d8f9-q4wzn   1/1   <span class="bad">Terminating</span>         <span class="cm"># one old goes</span></span>
+<span class="cm">… the same, three more times</span></pre>
+  <p class="take fragment">Busiest moment: 5 Pods, 4 ready.</p>
   <aside class="notes">
-    In the watch: one new Pod appears, turns 1/1, one old Pod Terminating, four times over.
     A Terminating Pod isn't counted in the 5, so kubectl get pods may briefly show more.
+    Afterwards: kubectl get rs -l app=who shows the new ReplicaSet with 4 and the old one with 0.
   </aside>
 </section>
 
 <section>
   <div class="kicker">Break it</div>
   <h2>Ship a broken build</h2>
-  <p>Give the container the argument <code>--no-such-flag</code>: the app crashes on start.</p>
-<pre class="term"><span class="cmd">kubectl rollout status deployment/who --timeout=30s</span>
+  <div class="cols wide-left">
+    <p>Give the app a flag it doesn't know, so it crashes on start. Under the container, next to <code>image</code>, then apply:</p>
+<pre class="yaml big"><code class="language-yaml" data-trim>
+args:
+  - --no-such-flag
+</code></pre>
+  </div>
+<pre class="term fragment"><span class="cmd">kubectl rollout status deployment/who --timeout=30s</span>
 <span class="bad">error: timed out waiting for the condition</span>
 <span class="cmd">kubectl get pods -l app=who</span>
-<span class="out">who-7d9f8c6b5-…   1/1   <span class="ok">Running</span>            <span class="cm"># × 4 old</span></span>
-<span class="out">who-6f4d9b7c2-…   0/1   <span class="bad">CrashLoopBackOff</span></span></pre>
-  <p class="take">Users see nothing wrong: no old Pod goes until a new one is ready.</p>
+<span class="out">who-7d9f8c6b5-k8x2p   1/1   <span class="ok">Running</span>            <span class="cm"># v1.11, still serving</span></span>
+<span class="out">who-7d9f8c6b5-m3v7r   1/1   <span class="ok">Running</span>            <span class="cm"># v1.11, still serving</span></span>
+<span class="out">who-7d9f8c6b5-p9d2s   1/1   <span class="ok">Running</span>            <span class="cm"># v1.11, still serving</span></span>
+<span class="out">who-7d9f8c6b5-t5h8w   1/1   <span class="ok">Running</span>            <span class="cm"># v1.11, still serving</span></span>
+<span class="out">who-6f4d9b7c2-x7n4c   0/1   <span class="bad">CrashLoopBackOff</span>   <span class="cm"># new, with the bad flag</span></span></pre>
+  <p class="take fragment">No old Pod goes until a new one is ready. Users see nothing wrong.</p>
   <aside class="notes">
-    That's maxUnavailable: 0 plus the readiness probe. With maxUnavailable above 0, or no readiness probe, users would see errors.
-    The args line goes under the container, next to image.
+    Why: maxUnavailable: 0 plus the readiness probe. With maxUnavailable above 0, or no readiness probe, users would see errors.
   </aside>
 </section>
 
 <section>
   <div class="kicker">Fix it</div>
   <h2>Roll back</h2>
-<pre class="term big"><span class="cmd">kubectl rollout undo deployment/who</span>
-<span class="out">deployment.apps/who <span class="ok">rolled back</span></span></pre>
-  <div class="card bad fragment" style="margin-top:20px">
+<pre class="term"><span class="cmd">kubectl rollout history deployment/who</span>
+<span class="out">REVISION   CHANGE-CAUSE</span>
+<span class="out">1          &lt;none&gt;     <span class="cm"># v1.10</span></span>
+<span class="out">2          &lt;none&gt;     <span class="cm"># v1.11</span></span>
+<span class="out">3          &lt;none&gt;     <span class="cm"># v1.11 + bad flag</span></span>
+<span class="cmd">kubectl rollout undo deployment/who</span>
+<span class="out">deployment.apps/who <span class="ok">rolled back</span>   <span class="cm"># to revision 2</span></span></pre>
+  <div class="card bad fragment">
     <p style="margin:0">But <code>who.yaml</code> still has the bad <code>args</code>. The next apply breaks it again.</p>
   </div>
-  <p class="take">rollout undo is the emergency brake. The real fix goes in Git.</p>
+  <p class="fragment" style="margin-top:16px"><b>Real fix:</b> delete the <code>args</code> lines → commit → <code>kubectl apply -f who.yaml</code></p>
+  <p class="take fragment">rollout undo is the emergency brake. The real fix goes in Git.</p>
   <aside class="notes">
-    kubectl rollout history deployment/who lists the revisions.
-    Real fix: remove the args line, commit, apply. Then kubectl diff -f who.yaml shows nothing.
+    After the real fix, kubectl diff -f who.yaml shows nothing.
   </aside>
-</section>
-
-<section>
-  <h2>Recreate: all out, then all in</h2>
-  <svg class="d" viewBox="0 0 1170 260" role="img" aria-label="Recreate: 4 old Pods stop, for a few seconds there are zero Pods, then 4 new Pods start">
-    <rect class="pod" x="10" y="60" width="300" height="130" rx="12"/>
-    <text class="b" x="35" y="110">4 old Pods</text>
-    <text class="m" x="35" y="150">v1.10</text>
-    <g class="fragment">
-      <path class="arrow" d="M312,125 L420,125"/>
-      <rect class="bad" x="430" y="60" width="300" height="130" rx="12"/>
-      <text class="b badt" x="455" y="110">0 Pods</text>
-      <text class="s" x="455" y="150">downtime</text>
-    </g>
-    <g class="fragment">
-      <path class="arrow" d="M732,125 L840,125"/>
-      <rect class="pod" x="850" y="60" width="300" height="130" rx="12" style="stroke:var(--accent)"/>
-      <text class="b" x="875" y="110">4 new Pods</text>
-      <text class="m acc" x="875" y="150">v1.11</text>
-    </g>
-  </svg>
-  <p class="lead fragment">Use it when old and new <b>can't</b> run together, e.g. a database change v1.10 can't read.</p>
-  <aside class="notes">
-    YAML: strategy with just type: Recreate. The rollingUpdate block isn't allowed with Recreate.
-    Show it live with the watch running: all four go Terminating together.
-  </aside>
-</section>
-
-<section>
-  <div class="kicker">Trap</div>
-  <h2>The kubectl set image shortcut</h2>
-<pre class="term"><span class="cmd">kubectl set image deployment/who whoami=traefik/whoami:v1.11</span>
-<span class="cmd">kubectl diff -f who.yaml</span>
-<span class="bad">-  image: traefik/whoami:v1.11</span>
-<span class="ok">+  image: traefik/whoami:v1.10</span></pre>
-  <p class="lead fragment">Git says v1.10. The cluster runs v1.11. That's <b>drift</b>.</p>
-  <p class="take">Nobody reading the repo knows what's running.</p>
-  <aside class="notes">Put it back with kubectl apply -f who.yaml.</aside>
-</section>
-
-<section>
-  <h2>Build once, deploy many</h2>
-  <svg class="d" viewBox="0 0 1170 360" role="img" aria-label="CI builds the image once, writes its tag into the manifest in Git, and the same image goes to dev, staging and production with different settings">
-    <rect class="box" x="10" y="130" width="230" height="100" rx="12"/>
-    <text class="b" x="35" y="172">CI builds</text>
-    <text class="m" x="35" y="206">api:1.5</text>
-    <g class="fragment">
-      <path class="arrow" d="M242,180 L330,180"/>
-      <rect class="cp" x="340" y="130" width="280" height="100" rx="12"/>
-      <text class="b" x="365" y="172">commit in Git</text>
-      <text class="m" x="365" y="206">image: api:1.5</text>
-    </g>
-    <g class="fragment">
-      <path class="arrow" d="M622,165 C690,165 690,60 756,60"/>
-      <path class="arrow" d="M622,180 L756,180"/>
-      <path class="arrow" d="M622,195 C690,195 690,300 756,300"/>
-      <rect class="pod" x="760" y="20" width="390" height="80" rx="10"/>
-      <text class="b" x="785" y="70">dev</text>
-      <rect class="pod" x="760" y="140" width="390" height="80" rx="10"/>
-      <text class="b" x="785" y="190">staging</text>
-      <rect class="pod" x="760" y="260" width="390" height="80" rx="10"/>
-      <text class="b" x="785" y="310">production</text>
-    </g>
-  </svg>
-  <p class="take">Same image everywhere. Only its settings (lesson 12) change.</p>
 </section>
 
 <!-- ============ 02 Strategies ============ -->
@@ -304,11 +289,11 @@ spec:
 <section>
   <h2>Four ways to release</h2>
   <table>
-    <tr><th>Strategy</th><th>Use when</th></tr>
-    <tr><td><b>RollingUpdate</b> <span class="muted">(default)</span></td><td>Most releases. Old and new can run side by side</td></tr>
-    <tr class="fragment"><td><b>Recreate</b></td><td>Old and new <em>can't</em> run together</td></tr>
-    <tr class="fragment"><td><b>Blue-green</b></td><td>You want an instant switch and an instant way back</td></tr>
-    <tr class="fragment"><td><b>Canary</b></td><td>Try a risky change on a few users first</td></tr>
+    <tr><th>Strategy</th><th>How</th><th>Use when</th></tr>
+    <tr><td><b>RollingUpdate</b> <span class="muted">(default)</span></td><td>Replace Pods a few at a time</td><td>Most releases</td></tr>
+    <tr class="fragment"><td><b>Recreate</b></td><td>Stop all old Pods, then start new ones</td><td>Old and new <em>can't</em> run together</td></tr>
+    <tr class="fragment"><td><b>Blue-green</b></td><td>Two Deployments; switch the Service between them</td><td>You want an instant switch and an instant way back</td></tr>
+    <tr class="fragment"><td><b>Canary</b></td><td>A few new Pods share the Service with old ones</td><td>Try a risky change on a few users first</td></tr>
   </table>
   <aside class="notes">
     College exam timetable. Rolling: one department at a time moves. Recreate: college closes a day, then everyone starts on the new one.
@@ -317,32 +302,65 @@ spec:
 </section>
 
 <section>
-  <h2>Blue-green: flip the selector</h2>
-  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Users reach the Service shop; its selector picks track blue, then is switched to track green; both Deployments keep running">
+  <h2>Recreate: all out, then all in</h2>
+  <svg class="d" viewBox="0 0 1170 260" role="img" aria-label="Recreate: 4 old Pods stop, for a few seconds there are zero Pods, then 4 new Pods start">
+    <rect class="pod" x="10" y="60" width="300" height="130" rx="12"/>
+    <text class="b" x="35" y="110">4 old Pods</text>
+    <text class="m" x="35" y="150">old version</text>
+    <g class="fragment">
+      <path class="arrow" d="M312,125 L420,125"/>
+      <rect class="bad" x="430" y="60" width="300" height="130" rx="12"/>
+      <text class="b badt" x="455" y="110">0 Pods</text>
+      <text class="s" x="455" y="150">downtime</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M732,125 L840,125"/>
+      <rect class="pod" x="850" y="60" width="300" height="130" rx="12" style="stroke:var(--accent)"/>
+      <text class="b" x="875" y="110">4 new Pods</text>
+      <text class="m acc" x="875" y="150">new version</text>
+    </g>
+  </svg>
+  <p class="lead fragment">Use it when old and new <b>can't</b> run together, e.g. the new version renames a database column the old one still reads.</p>
+  <p class="fragment"><b>Try it:</b> in who.yaml set <code>type: Recreate</code>, delete the <code>rollingUpdate:</code> block, set the image back to <code>v1.10</code>, apply and watch.</p>
+  <aside class="notes">
+    The rollingUpdate block isn't allowed with Recreate. With the watch running, all four go Terminating together.
+    Put the strategy back to RollingUpdate afterwards.
+  </aside>
+</section>
+
+<section>
+  <h2>Blue-green: flip the Service's selector</h2>
+  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Users reach the Service shop. Its selector first picks track blue, the shop-blue Deployment with v1.10; then it is switched to track green, the shop-green Deployment with v1.11. Both Deployments keep running">
     <rect class="box" x="10" y="160" width="190" height="100" rx="12"/>
     <text class="b" x="35" y="218">users</text>
-    <path class="arrow acc" d="M202,210 L296,210"/>
-    <rect class="svc" x="300" y="140" width="340" height="140" rx="14"/>
-    <text class="b" x="325" y="185">Service shop</text>
+    <path class="arrow" d="M202,210 L296,210"/>
+    <rect class="box" x="300" y="130" width="340" height="160" rx="14"/>
+    <text class="b" x="325" y="175">Service shop</text>
+    <text class="m" x="325" y="215">app: shop</text>
     <g class="fragment fade-out" data-fragment-index="0">
-      <text class="m acc" x="325" y="225">track: blue</text>
-      <path class="link" d="M642,190 L776,100"/>
+      <text class="m bluet" x="325" y="255">track: blue</text>
+      <path class="arrow" d="M642,180 L776,110"/>
     </g>
     <g class="fragment" data-fragment-index="0">
-      <text class="m acc" x="325" y="225">track: green</text>
-      <path class="link" d="M642,230 L776,320"/>
+      <text class="m greent" x="325" y="255">track: green</text>
+      <path class="arrow" d="M642,240 L776,310"/>
     </g>
-    <rect class="pod" x="780" y="30" width="370" height="140" rx="12"/>
-    <text class="b" x="805" y="75">shop-blue</text>
-    <text class="m" x="805" y="110">v1.10 · 2 Pods</text>
-    <rect class="pod" x="780" y="250" width="370" height="140" rx="12" style="stroke:var(--accent)"/>
-    <text class="b" x="805" y="295">shop-green</text>
-    <text class="m acc" x="805" y="330">v1.11 · 2 Pods</text>
+    <rect class="blue" x="780" y="30" width="370" height="140" rx="12"/>
+    <text class="b bluet" x="805" y="75">shop-blue</text>
+    <text class="m" x="805" y="110">v1.10 (old) · 2 Pods</text>
+    <rect class="green" x="780" y="250" width="370" height="140" rx="12"/>
+    <text class="b greent" x="805" y="295">shop-green</text>
+    <text class="m" x="805" y="330">v1.11 (new) · 2 Pods</text>
+    <g class="fragment fade-out" data-fragment-index="0">
+      <text class="s" x="805" y="365">ready, but no users yet</text>
+    </g>
+    <g class="fragment" data-fragment-index="0">
+      <text class="s" x="805" y="145">still running, no users</text>
+    </g>
   </svg>
-  <p class="take">One change moves every user at once. Switching back is the same change.</p>
+  <p class="take fragment">One change moves every user at once. Switching back is the same change.</p>
   <aside class="notes">
-    Green is running and ready the whole time, but gets no users until the switch.
-    Cost: you pay for double the Pods during the release.
+    Click 1 flips the selector. Cost: you pay for double the Pods during the release.
   </aside>
 </section>
 
@@ -365,53 +383,102 @@ spec:
     <div class="step">
       <h3>The switch</h3>
       <p><code>blue</code> → <code>green</code>, then apply.</p>
-      <p>Pods are labelled <code>app: shop</code> plus <code>track: blue</code> or <code>track: green</code>.</p>
+      <p>shop-blue Pods: <code>track: blue</code>, v1.10</p>
+      <p>shop-green Pods: <code>track: green</code>, v1.11</p>
+      <p>Both also have <code>app: shop</code>.</p>
     </div>
   </div>
   <aside class="notes">
-    Test loop: kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- sh -c 'for i in 1 2 3 4 5 6; do wget -qO- http://shop | grep Hostname; done'
+    The two Deployments are in the lesson. Test loop: kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- sh -c 'for i in 1 2 3 4 5 6; do wget -qO- http://shop | grep Hostname; done'
   </aside>
 </section>
 
 <section>
-  <h2>Canary: share the Service</h2>
-  <svg class="d" viewBox="0 0 1170 380" role="img" aria-label="The Service selects only app shop, so it spreads requests over 3 blue Pods and 1 green Pod; about one in four requests reaches the new version">
-    <rect class="svc" x="10" y="120" width="330" height="140" rx="14"/>
+  <h2>Canary: 1 new Pod in 4 gets ~1 in 4 requests</h2>
+  <svg class="d" viewBox="0 0 1170 380" role="img" aria-label="The Service selects only app shop, so it matches 3 shop-blue Pods with v1.10 and 1 shop-green Pod with v1.11; about one in four requests reaches the new version">
+    <rect class="box" x="10" y="120" width="330" height="140" rx="14"/>
     <text class="b" x="35" y="165">Service shop</text>
-    <text class="m acc" x="35" y="205">app: shop</text>
-    <text class="s" x="35" y="240">no track label</text>
-    <path class="link" d="M342,170 L626,60"/>
-    <path class="link" d="M342,185 L626,145"/>
-    <path class="link" d="M342,200 L626,230"/>
-    <path class="link" d="M342,215 L626,315"/>
-    <rect class="pod" x="630" y="25" width="260" height="70" rx="10"/><text class="m" x="655" y="68">blue v1.10</text>
-    <rect class="pod" x="630" y="110" width="260" height="70" rx="10"/><text class="m" x="655" y="153">blue v1.10</text>
-    <rect class="pod" x="630" y="195" width="260" height="70" rx="10"/><text class="m" x="655" y="238">blue v1.10</text>
-    <rect class="pod" x="630" y="280" width="260" height="70" rx="10" style="stroke:var(--accent);stroke-width:5"/><text class="m acc" x="655" y="323">green v1.11</text>
-    <text class="b acc fragment" x="920" y="323">~1 in 4</text>
+    <text class="m" x="35" y="205">app: shop</text>
+    <text class="s" x="35" y="240">matches all 4 Pods</text>
+    <path class="arrow" d="M342,170 L626,60"/>
+    <path class="arrow" d="M342,185 L626,145"/>
+    <path class="arrow" d="M342,200 L626,230"/>
+    <path class="arrow" d="M342,215 L626,315"/>
+    <rect class="blue" x="630" y="25" width="300" height="70" rx="10"/><text class="m" x="655" y="68">shop-blue  v1.10</text>
+    <rect class="blue" x="630" y="110" width="300" height="70" rx="10"/><text class="m" x="655" y="153">shop-blue  v1.10</text>
+    <rect class="blue" x="630" y="195" width="300" height="70" rx="10"/><text class="m" x="655" y="238">shop-blue  v1.10</text>
+    <rect class="green" x="630" y="280" width="300" height="70" rx="10" style="stroke-width:5"/><text class="m" x="655" y="323">shop-green v1.11</text>
+    <text class="b greent fragment" x="955" y="323">~1 in 4</text>
   </svg>
-  <p class="take">To widen the canary, change the replica counts.</p>
+  <p class="take fragment">To widen the canary, change the replica counts: 2 + 2 → half the requests.</p>
   <aside class="notes">
     Lesson: selector only app: shop, shop-blue 3 replicas, shop-green 1. With 12 requests, about 3 come from green.
     Tools like Argo Rollouts or a service mesh give exact percentages; the idea is the same.
   </aside>
 </section>
 
-<!-- ============ 03 Private registry ============ -->
+<!-- ============ 03 Git ============ -->
 <section class="divider">
   <div class="num">03</div>
+  <h2>Git is what's running</h2>
+  <p>Change the file, not the cluster</p>
+</section>
+
+<section>
+  <div class="kicker">Trap</div>
+  <h2>Changing the cluster without Git</h2>
+<pre class="term"><span class="cmd">kubectl set image deployment/who whoami=traefik/whoami:v1.11</span>
+<span class="cmd">kubectl diff -f who.yaml</span>
+<span class="out">-  image: traefik/whoami:v1.11   <span class="cm"># what the cluster runs</span></span>
+<span class="out">+  image: traefik/whoami:v1.10   <span class="cm"># what who.yaml (Git) says</span></span></pre>
+  <p class="lead fragment">Git and the cluster disagree. That's <b>drift</b>.</p>
+  <p class="fragment">Nobody reading the repo knows what's running. The next apply silently undoes it.</p>
+  <p class="take fragment">Put it back: kubectl apply -f who.yaml. Change the image in the file instead.</p>
+</section>
+
+<section>
+  <h2>Build once, deploy many</h2>
+  <svg class="d" viewBox="0 0 1170 360" role="img" aria-label="CI builds your image app:1.5 once, writes its tag into the manifest in Git, and the same image goes to dev, staging and production">
+    <rect class="box" x="10" y="130" width="230" height="100" rx="12"/>
+    <text class="b" x="35" y="172">CI builds once</text>
+    <text class="m" x="35" y="206">app:1.5</text>
+    <g class="fragment">
+      <path class="arrow" d="M242,180 L330,180"/>
+      <rect class="cp" x="340" y="130" width="280" height="100" rx="12"/>
+      <text class="b" x="365" y="172">commit in Git</text>
+      <text class="m" x="365" y="206">image: app:1.5</text>
+    </g>
+    <g class="fragment">
+      <path class="arrow" d="M622,165 C690,165 690,60 756,60"/>
+      <path class="arrow" d="M622,180 L756,180"/>
+      <path class="arrow" d="M622,195 C690,195 690,300 756,300"/>
+      <rect class="box" x="760" y="20" width="390" height="80" rx="10"/>
+      <text class="b" x="785" y="70">dev</text><text class="m" x="960" y="70">app:1.5</text>
+      <rect class="box" x="760" y="140" width="390" height="80" rx="10"/>
+      <text class="b" x="785" y="190">staging</text><text class="m" x="960" y="190">app:1.5</text>
+      <rect class="box" x="760" y="260" width="390" height="80" rx="10"/>
+      <text class="b" x="785" y="310">production</text><text class="m" x="960" y="310">app:1.5</text>
+    </g>
+  </svg>
+  <p class="fragment">Rebuild for each environment, and production runs an image nobody tested.</p>
+  <p class="take fragment">Same image everywhere. Only its ConfigMaps and Secrets (lesson 12) change.</p>
+</section>
+
+<!-- ============ 04 Private registry ============ -->
+<section class="divider">
+  <div class="num">04</div>
   <h2>Private images</h2>
   <p>Letting the nodes pull from a private registry</p>
 </section>
 
 <section>
-  <h2>ImagePullBackOff</h2>
+  <h2>ImagePullBackOff: the node has no login</h2>
 <pre class="term"><span class="cmd">kubectl get pods -l app=mine</span>
 <span class="out">mine-6d8f9c7b5-q2wxz   0/1   <span class="bad">ImagePullBackOff</span></span>
 <span class="cmd">kubectl describe pod -l app=mine | tail -5</span>
-<span class="bad">… 401 Unauthorized</span></pre>
-  <p class="lead fragment">The kubelet on the node tried to pull with <b>no login</b>.</p>
-  <p class="take">Your <code>docker login</code> on the laptop doesn't help the nodes.</p>
+<span class="out">Warning  Failed  …  failed to pull "ghcr.io/YOU/IMAGE:TAG": <span class="bad">401 Unauthorized</span></span></pre>
+  <p class="lead fragment">The node tried to download the image <b>without a username or token</b>.</p>
+  <p class="take fragment">Your <code>docker login</code> on the laptop doesn't help. The cluster needs its own.</p>
   <aside class="notes">
     mine.yaml uses your GHCR image from lesson 8. If the package is public it just works; make it private to try this.
   </aside>
@@ -420,21 +487,24 @@ spec:
 <section>
   <div class="kicker">Fix it · 1</div>
   <h2>A docker-registry Secret</h2>
-<pre class="term"><span class="cmd">kubectl create secret docker-registry ghcr-pull \</span>
+<pre class="term"><span class="cmd">echo ghcr-pull.local.yaml &gt;&gt; .gitignore</span>
+<span class="cmd">kubectl create secret docker-registry ghcr-pull \</span>
 <span class="out">  --docker-server=ghcr.io \</span>
 <span class="out">  --docker-username=YOUR-USERNAME \</span>
 <span class="out">  --docker-password=YOUR-TOKEN \</span>
 <span class="out">  --dry-run=client -o yaml &gt; ghcr-pull.local.yaml</span>
 <span class="cmd">kubectl apply -f ghcr-pull.local.yaml</span></pre>
-  <p class="take">Token: a GitHub PAT with only <code>read:packages</code>. Keep the file out of Git.</p>
-  <aside class="notes">Add ghcr-pull.local.yaml to .gitignore first.</aside>
+  <p><code>--dry-run=client -o yaml</code>: don't create it, just write the YAML to a file.</p>
+  <p class="take">Token: a GitHub token (PAT) with only <code>read:packages</code>. The file stays out of Git.</p>
 </section>
 
 <section>
   <div class="kicker">Fix it · 2</div>
   <h2>Point the Pod at it</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-3">
+<pre class="yaml"><code class="language-yaml" data-trim data-line-numbers="4-5">
+spec:
+  template:
     spec:
       imagePullSecrets:
         - name: ghcr-pull
@@ -443,7 +513,7 @@ spec:
           image: ghcr.io/YOU/IMAGE:TAG
 </code></pre>
     <div class="step">
-      <p>In the Pod template's <code>spec</code>, beside <code>containers</code>.</p>
+      <p>In the <b>Pod's</b> <code>spec</code> (the one inside <code>template:</code>), beside <code>containers</code>.</p>
       <p>Apply: the new Pod pulls and runs.</p>
     </div>
   </div>
@@ -491,7 +561,7 @@ spec:
 
 <section>
   <div class="kicker">Check 6</div>
-  <p class="q">Version 4.0 changes the results table so version 3.x can't read it. Which strategy?</p>
+  <p class="q">Version 4.0 changes a database table so version 3.x can't read it. Which strategy?</p>
   <div class="a fragment"><b>Recreate</b>: every old Pod stops before any new one starts. A rolling update would run 3.x and 4.0 together.</div>
 </section>
 

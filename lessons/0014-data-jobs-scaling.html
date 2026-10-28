@@ -4,12 +4,12 @@
 <h1>Data, jobs &amp; scaling</h1>
 
 <h2>Why this matters for DevOps</h2>
-<p>Pods are cattle: Kubernetes deletes and recreates them all the time, on any node. That's fine for a stateless API, but a database Pod that forgets every order when it moves is a disaster. You also need work that runs on a clock, like a backup at 2 a.m., and apps that grow when a placement-results page gets ten times its usual traffic and shrink again after. These three things are the most common “day two” questions in interviews.</p>
+<p>Kubernetes deletes and recreates Pods all the time, on any node. That's fine for a web API that keeps nothing, but a database Pod that forgets every order when it moves is a disaster. You also need work that runs on a clock, like a backup at 2 a.m., and apps that grow when a placement-results page gets ten times its usual traffic and shrink again after. These three come up in almost every Kubernetes interview.</p>
 
 <h2>Three ideas, no more</h2>
-<p><b>emptyDir vs PersistentVolumeClaim</b>: an <code>emptyDir</code> volume is a scratch folder that lives exactly as long as the Pod. Delete the Pod and it's gone. A <em>PersistentVolumeClaim</em> (PVC) is a request: “I need 1 GiB of disk”. The cluster's <em>StorageClass</em> creates a real disk (a PersistentVolume) for it, which lives on after the Pod. <code>ReadWriteOnce</code> means only one node can mount that disk at a time, which is what a normal cloud disk like AWS EBS allows. <a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/">[Kubernetes docs: Persistent Volumes]</a></p>
-<p><b>Job and CronJob</b>: a Deployment keeps Pods running forever. A <em>Job</em> runs a Pod until it <em>finishes</em> successfully. A <em>CronJob</em> creates a Job on a schedule, written in the same format as Linux <code>cron</code>: <code>0 2 * * *</code> means 02:00 every day, by the cluster's clock unless you set <code>timeZone</code>, for example <code>timeZone: "Asia/Kolkata"</code>. Three settings matter: <code>restartPolicy</code> (retry in the same Pod, <code>OnFailure</code>, or never, <code>Never</code>), <code>backoffLimit</code> (how many retries before the Job is marked failed), and <code>concurrencyPolicy</code> (what to do if the last run is still going when the next is due). <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">[Kubernetes docs: CronJob]</a></p>
-<p><b>HorizontalPodAutoscaler (HPA)</b>: a controller that changes a Deployment's <code>replicas</code> to keep average CPU near a target. It reads CPU from <em>metrics-server</em> and works in <em>percent of the CPU request</em>, so a Pod with no CPU request can't be measured at all. <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">[Kubernetes docs: HPA]</a></p>
+<p><b>emptyDir vs PersistentVolumeClaim</b>: in lesson 4 you kept PostgreSQL's data in a Docker named volume (<code>-v pgdata:/var/lib/postgresql/data</code>). A Pod has <em>volumes</em> too: folders mounted into its containers. An <code>emptyDir</code> volume is a scratch folder that lives exactly as long as the Pod. Delete the Pod and it's gone. A <em>PersistentVolumeClaim</em> (PVC) is a request: “I need 1 GiB of disk”. The cluster's <em>StorageClass</em> creates a real disk (a PersistentVolume) for it, which lives on after the Pod, like <code>pgdata</code>. <code>ReadWriteOnce</code> means only one node can mount that disk at a time, which is what a normal cloud disk like AWS EBS allows. <a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/">[Kubernetes docs: Persistent Volumes]</a></p>
+<p><b>Job and CronJob</b>: a Deployment keeps Pods running forever. A <em>Job</em> runs a Pod until it <em>finishes</em> successfully. A <em>CronJob</em> creates a Job on a schedule, written in the same format as Linux <code>cron</code>: <code>0 2 * * *</code> means 02:00 every day, by the cluster's clock unless you set <code>timeZone</code>, for example <code>timeZone: "Asia/Kolkata"</code>. In the YAML, a CronJob holds a Job (<code>jobTemplate</code>), which holds a Pod (<code>template</code>). Three settings matter: <code>restartPolicy</code> (<code>OnFailure</code> restarts the container in the same Pod; <code>Never</code> makes the Job start a new Pod), <code>backoffLimit</code> (how many retries before the Job is marked failed), and <code>concurrencyPolicy</code> (what to do if the last run is still going when the next is due). <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">[Kubernetes docs: CronJob]</a></p>
+<p><b>HorizontalPodAutoscaler (HPA)</b>: so far you set <code>replicas</code> yourself. An HPA is a controller that changes a Deployment's <code>replicas</code> for you, to keep average CPU near a target. <em>Horizontal</em> means more Pods, not bigger Pods. It reads each Pod's CPU use from <em>metrics-server</em>, an add-on you install in the cluster. It works in <em>percent of the CPU request</em>. A container's <em>CPU request</em> is the CPU kept aside for it on its node, written in millicores: <code>200m</code> is a fifth of one CPU (1000m = 1 CPU). Its <em>limit</em> is the most it may use. 100m used with a 200m request is 50%; 500m used is 250%, so going over 100% is normal. A Pod with no CPU request can't be measured at all. <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">[Kubernetes docs: HPA]</a></p>
 <p class="aside">Your hostel room is a PVC: you go home for the holidays (the Pod is deleted) and your books are still there when you come back. A train's sleeper berth is an <code>emptyDir</code>: get off, and whatever you left behind is gone. The HPA is the canteen manager who opens a second counter when the queue gets long, and closes it after lunch.</p>
 
 <h2>Before you start</h2>
@@ -37,10 +37,12 @@ spec:
   strategy:
     type: Recreate
   selector:
-    matchLabels: { app: db }
+    matchLabels:
+      app: db
   template:
     metadata:
-      labels: { app: db }
+      labels:
+        app: db
     spec:
       containers:
         - name: postgres
@@ -48,7 +50,9 @@ spec:
           env:
             - name: POSTGRES_PASSWORD
               valueFrom:
-                secretKeyRef: { name: db-secret, key: POSTGRES_PASSWORD }
+                secretKeyRef:
+                  name: db-secret
+                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:
@@ -75,7 +79,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: db-data
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes:
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
@@ -88,7 +93,7 @@ kubectl rollout status deployment/db
 kubectl get pvc,pv</code></pre>
 The PVC is <code>Bound</code> to a PersistentVolume the StorageClass created for you.</li>
 <li>Repeat step 2: create the table, insert the order, delete the Pod, and select again. This time <code>masala dosa</code> is still there. Run <code>kubectl get pod -l app=db -o wide</code> before and after the delete: on most laptop clusters the disk is a folder on one node, so the new Pod is placed on that same node. On AWS, an EBS disk is detached from the old node and attached to the new one instead.</li>
-<li>Why <code>replicas: 1</code> and <code>Recreate</code>? Two PostgreSQL processes writing to the same data folder corrupt it, and a <code>ReadWriteOnce</code> disk can't be mounted on two nodes anyway. A rolling update would start the new Pod while the old one still holds the disk. <code>Recreate</code> stops the old Pod first. Need more than one database copy? That's a StatefulSet with PostgreSQL's own replication, or, more often at work, a managed database like Amazon RDS outside the cluster.</li>
+<li>Why <code>replicas: 1</code> and <code>Recreate</code>? Two PostgreSQL processes writing to the same data folder corrupt it, and a <code>ReadWriteOnce</code> disk can't be mounted on two nodes anyway. A rolling update would start the new Pod while the old one still holds the disk. <code>Recreate</code> stops the old Pod first. Need more than one database copy? At work, use a database the cloud provider runs for you, like Amazon RDS, outside the cluster.</li>
 </ol>
 
 <h2>Do it: a nightly job</h2>
@@ -110,13 +115,16 @@ spec:
           containers:
             - name: backup
               image: busybox:1.36
-              command: ["sh", "-c", "echo backup started at $(date); sleep 90; echo done"]</code></pre>
+              command:
+                - sh
+                - -c
+                - "echo backup started at $(date); sleep 90; echo done"</code></pre>
 <pre><code>kubectl apply -f backup.yaml
 kubectl get jobs -w</code></pre>
 Wait three minutes. A new Job is due every minute, but you never see two running together: with <code>Forbid</code>, a run that's due while the last is still going is <em>skipped</em>. With <code>Allow</code> (the default), two backups would run together and fight over the same files. <code>Replace</code> would kill the old one and start the new one.</li>
-<li>Make the backup fail. Change the command to <code>["sh", "-c", "echo disk full; exit 1"]</code> and <code>restartPolicy</code> to <code>Never</code>, apply, and wait for the next run:
+<li>Make the backup fail. Change the last line of <code>command</code> to <code>- "echo disk full; exit 1"</code> and <code>restartPolicy</code> to <code>Never</code>, apply, and wait for the next run:
 <pre><code>kubectl get pods -w</code></pre>
-With <code>Never</code>, each failure makes a <em>new</em> Pod, so you can read every failed run's logs. After the first try plus <code>backoffLimit: 2</code> retries (3 Pods), the Job is marked <code>Failed</code> and stops. <code>kubectl describe job</code> shows <code>BackoffLimitExceeded</code>. That's the event you'd alert on at work. Before cleanup, inspect <code>kubectl get pv</code> and its <code>RECLAIM POLICY</code>. Deleting the PVC deletes its backing storage when that policy is <code>Delete</code>; with <code>Retain</code>, the volume and data remain for manual recovery. Now run <code>kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml</code>.</li>
+With <code>Never</code>, each failure makes a <em>new</em> Pod, so you can read every failed run's logs. After the first try plus <code>backoffLimit: 2</code> retries (3 Pods), the Job is marked <code>Failed</code> and stops. <code>kubectl describe job</code> shows <code>BackoffLimitExceeded</code>. Look for it: a backup that fails quietly is no backup. Before cleanup, inspect <code>kubectl get pv</code> and its <code>RECLAIM POLICY</code>. Deleting the PVC deletes its backing storage when that policy is <code>Delete</code>; with <code>Retain</code>, the volume and data remain for manual recovery. Now run <code>kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml</code>.</li>
 </ol>
 
 <h2>Do it: autoscaling</h2>
@@ -135,24 +143,29 @@ metadata:
   name: php-apache
 spec:
   selector:
-    matchLabels: { app: php-apache }
+    matchLabels:
+      app: php-apache
   template:
     metadata:
-      labels: { app: php-apache }
+      labels:
+        app: php-apache
     spec:
       containers:
         - name: php-apache
           image: registry.k8s.io/hpa-example
           resources:
-            requests: { cpu: 200m }
-            limits: { cpu: 500m }
+            requests:
+              cpu: 200m
+            limits:
+              cpu: 500m
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: php-apache
 spec:
-  selector: { app: php-apache }
+  selector:
+    app: php-apache
   ports:
     - port: 80
 ---
@@ -182,9 +195,9 @@ After a minute, <code>TARGETS</code> shows about <code>cpu: 0%/50%</code>.</li>
 <pre><code>kubectl run load --rm -it --image=busybox:1.36 --restart=Never -- \
   sh -c "while sleep 0.01; do wget -qO- http://php-apache; done"</code></pre>
 <b>Predict first:</b> how many replicas will you get? Watch the first terminal. CPU jumps above 100%, and within a minute or two <code>REPLICAS</code> climbs (to 4 or 5). The HPA's rule is roughly: <em>wanted replicas = current replicas × current CPU ÷ target CPU</em>, rounded up, kept between min and max. Stop the load with Ctrl+C. Scale-down is slow on purpose: by default the HPA waits 5 minutes of low CPU before removing Pods, so a short dip doesn't make it shrink and grow again.</li>
-<li>Break it: remove the <code>resources:</code> block (all three lines) from the Deployment and apply. After a minute, <code>kubectl get hpa</code> shows <code>cpu: &lt;unknown&gt;/50%</code>, and <code>kubectl describe hpa php-apache</code> says <code>missing request for cpu</code>. No request means no 100% to measure against, so the HPA does nothing. Clean up: <code>kubectl delete -f hpa.yaml</code>.</li>
+<li>Break it: remove the <code>resources:</code> block (all five lines) from the Deployment and apply. After a minute, <code>kubectl get hpa</code> shows <code>cpu: &lt;unknown&gt;/50%</code>, and <code>kubectl describe hpa php-apache</code> says <code>missing request for cpu</code>. No request means no 100% to measure against, so the HPA does nothing. Clean up: <code>kubectl delete -f hpa.yaml</code>.</li>
 </ol>
-<p>What limits how fast you can scale? The HPA checks every 15 seconds and metrics-server data is a little behind; each new Pod must be scheduled, pull its image (fast if small and cached), start, and pass its readiness probe; and if the nodes are full, new Pods stay <code>Pending</code> until a <em>cluster autoscaler</em> adds nodes, which takes minutes. For a known sale, teams raise <code>minReplicas</code> before it starts.</p>
+<p>What limits how fast you can scale? The HPA checks every 15 seconds and metrics-server data is a little behind; each new Pod must be scheduled, pull its image (fast if small and cached), start, and pass its readiness probe; and if the nodes are full, new Pods stay <code>Pending</code> until more nodes are added, which takes minutes. For a known sale, teams raise <code>minReplicas</code> before it starts.</p>
 
 <div class="trap"><b>Drill: spot the problems.</b> The placement cell runs MySQL for student records with this Deployment. A 2 GiB PVC called <code>records</code> already exists. Find three problems, and say what happens to the data when the Pod moves to another node.
 <pre><code>spec:
@@ -195,14 +208,16 @@ After a minute, <code>TARGETS</code> shows about <code>cpu: 0%/50%</code>.</li>
         - name: mysql
           image: mysql:latest
           env:
-            - { name: MYSQL_ROOT_PASSWORD, value: placement@123 }
+            - name: MYSQL_ROOT_PASSWORD
+              value: placement@123
           volumeMounts:
-            - { name: data, mountPath: /var/lib/mysql }
+            - name: data
+              mountPath: /var/lib/mysql
       volumes:
         - name: data
           emptyDir: {}</code></pre>
 <details><summary>Show the answer</summary>
-<p>With <code>emptyDir</code>, the data lives and dies with the Pod: when the Pod moves to another node, every student record is gone. Problems: (1) <b><code>emptyDir</code> instead of the PVC</b>: use <code>persistentVolumeClaim: { claimName: records }</code>. (2) <b><code>replicas: 3</code></b>: three MySQL processes would each have their own empty data, or with one shared disk would corrupt it, and a <code>ReadWriteOnce</code> disk mounts on one node only. Use 1 replica with <code>strategy: Recreate</code>, or a StatefulSet with replication, or a managed database. (3) <b>The root password is in plain text in the manifest</b>: move it to a Secret and use <code>secretKeyRef</code>. Bonus: <b><code>mysql:latest</code></b> can jump to a new major version on the next restart and fail to read the old data files; pin a version like <code>mysql:8.4</code>.</p></details>
+<p>With <code>emptyDir</code>, the data lives and dies with the Pod: when the Pod moves to another node, every student record is gone. Problems: (1) <b><code>emptyDir</code> instead of the PVC</b>: replace <code>emptyDir: {}</code> with <code>persistentVolumeClaim:</code> and, under it, <code>claimName: records</code>. (2) <b><code>replicas: 3</code></b>: three MySQL processes would each have their own empty data, or with one shared disk would corrupt it, and a <code>ReadWriteOnce</code> disk mounts on one node only. Use 1 replica with <code>strategy: Recreate</code>, or a database the cloud provider runs for you. (3) <b>The root password is in plain text in the manifest</b>: move it to a Secret and use <code>secretKeyRef</code>. Bonus: <b><code>mysql:latest</code></b> can jump to a new major version on the next restart and fail to read the old data files; pin a version like <code>mysql:8.4</code>.</p></details>
 </div>
 
 <h2>Practice questions</h2>
@@ -212,12 +227,17 @@ After a minute, <code>TARGETS</code> shows about <code>cpu: 0%/50%</code>.</li>
 <p>A food-delivery app runs PostgreSQL with the Deployment below. A PersistentVolumeClaim named <code>orders-data</code> (10 GiB, <code>ReadWriteOnce</code>) already exists.</p>
 <pre><code>apiVersion: apps/v1
 kind: Deployment
-metadata: { name: db }
+metadata:
+  name: db
 spec:
   replicas: 2
-  selector: { matchLabels: { app: db } }
+  selector:
+    matchLabels:
+      app: db
   template:
-    metadata: { labels: { app: db } }
+    metadata:
+      labels:
+        app: db
     spec:
       containers:
       - name: db
@@ -230,7 +250,8 @@ spec:
           mountPath: /data
       volumes:
       - name: data
-        persistentVolumeClaim: { claimName: orders-data }</code></pre>
+        persistentVolumeClaim:
+          claimName: orders-data</code></pre>
 <ol class="asks">
 <li><span class="am">[2]</span>Analyze what happens to the orders when the database Pod is rescheduled to another node.</li>
 <li><span class="am">[3]</span>Detect any three errors or bad practices in the manifest, and state how to fix each.</li>
@@ -240,7 +261,7 @@ spec:
 <ul>
 <li><b>Rescheduling:</b> the claim is mounted at <code>/data</code>, but PostgreSQL keeps its files in <code>/var/lib/postgresql/data</code>. So the orders are written to the container's own writable layer, not to the volume. When the Pod is rescheduled, the new container starts empty and every order is lost, even though a PVC exists. (With the right path, the volume would be detached and attached to the new node, and the data would survive.)</li>
 <li><b>Wrong <code>mountPath</code>:</b> fix it to <code>/var/lib/postgresql/data</code> (newer images use <code>/var/lib/postgresql</code>; check the image's docs, or set <code>PGDATA</code> to match).</li>
-<li><b><code>replicas: 2</code>:</b> two PostgreSQL servers can't share one data directory; they would corrupt it. A <code>ReadWriteOnce</code> volume also attaches to only one node, so the second Pod may hang in <code>ContainerCreating</code> with a Multi-Attach error. Fix: <code>replicas: 1</code> with <code>strategy: Recreate</code> (so the old Pod releases the disk before the new one starts), or a StatefulSet or operator with real replication, or a managed database like RDS.</li>
+<li><b><code>replicas: 2</code>:</b> two PostgreSQL servers can't share one data directory; they would corrupt it. A <code>ReadWriteOnce</code> volume also attaches to only one node, so the second Pod may hang in <code>ContainerCreating</code>. Fix: <code>replicas: 1</code> with <code>strategy: Recreate</code> (so the old Pod releases the disk before the new one starts), or a database the cloud provider runs for you, like Amazon RDS.</li>
 <li><b><code>postgres:latest</code>:</b> a restart can pull a new major version that can't read the existing data files. Fix: pin a version, for example <code>postgres:17</code>.</li>
 <li><b>Password in plain <code>value</code>:</b> anyone who can read the manifest or the Git repo sees it. Fix: <code>valueFrom: secretKeyRef</code> pointing to a Secret.</li>
 </ul>
@@ -259,9 +280,9 @@ spec:
 <ul>
 <li><b>How it runs:</b> the CronJob (<code>schedule: "30 23 * * *"</code>) creates a Job at each scheduled time; the Job creates a Pod and counts it done when the Pod exits with code 0.</li>
 <li><b><code>restartPolicy</code></b> (in the Pod template; must be <code>OnFailure</code> or <code>Never</code>, because a Job's Pod is meant to finish): <code>OnFailure</code> restarts the failed container inside the same Pod; <code>Never</code> leaves the failed Pod for you to inspect and the Job creates a new Pod.</li>
-<li><b><code>backoffLimit</code></b> (default 6): how many times the Job retries, with growing delays, before it's marked <code>Failed</code>. Too high and a broken report keeps retrying for a long time; too low and one short database hiccup fails the whole night. A small number such as 3, plus an alert on failed Jobs, is sensible.</li>
+<li><b><code>backoffLimit</code></b> (default 6): how many times the Job retries, with growing delays, before it's marked <code>Failed</code>. Too high and a broken report keeps retrying for a long time; too low and one short database hiccup fails the whole night. A small number such as 3 is sensible, and someone should check for failed Jobs.</li>
 <li><b><code>concurrencyPolicy</code>:</b> <code>Allow</code> (default) starts the new run alongside the old one; <code>Forbid</code> skips the new run while the old one is still going; <code>Replace</code> stops the old run and starts the new one.</li>
-<li><b>If last night's report is still running:</b> two runs at once would load the database twice and could send duplicate or half-finished reports. Use <code>concurrencyPolicy: Forbid</code>, so the new run is skipped, and add <code>activeDeadlineSeconds</code> so a stuck run is stopped long before the next one is due.</li>
+<li><b>If last night's report is still running:</b> two runs at once would load the database twice and could send duplicate or half-finished reports. Use <code>concurrencyPolicy: Forbid</code>, so the new run is skipped.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> the three settings explained 3 (1 each); what should happen on overlap, and which setting controls it 2.</p>
 </details></div>
@@ -277,9 +298,9 @@ spec:
 <textarea placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
-<li><b>Deciding:</b> metrics-server collects each Pod's CPU use from the kubelets. About every 15 s, the HPA works out the average utilisation and calculates <code>desired = ceil(current replicas × current utilisation ÷ 60%)</code>, kept between 3 and 15. Example: 3 Pods at 180% → 3 × 180 ÷ 60 = 9 replicas. It scales up quickly; it scales down only after utilisation has stayed low for a while (5 minutes by default), so it doesn't flap.</li>
+<li><b>Deciding:</b> metrics-server collects each Pod's CPU use from the kubelets. About every 15 s, the HPA works out the average utilisation and calculates <code>desired = current replicas × current utilisation ÷ 60%</code>, rounded up and kept between 3 and 15. Example: 3 Pods at 180% → 3 × 180 ÷ 60 = 9 replicas. It scales up quickly; it scales down only after utilisation has stayed low for a while (5 minutes by default), so a short dip doesn't make it shrink and grow again.</li>
 <li><b>Why CPU requests are needed:</b> utilisation means usage ÷ <em>request</em>. 300m used with a 500m request is 60%. Without a request, there's nothing to divide by: the HPA shows <code>&lt;unknown&gt;</code> and doesn't scale.</li>
-<li><b>What limits the speed:</b> the metrics delay (tens of seconds); the max of 15; free space on the nodes, since extra Pods stay <code>Pending</code> until the cluster autoscaler or Karpenter adds nodes, which takes minutes; image pull time and app start-up before readiness passes; and shared parts that don't scale, such as the database's connection limit. Known peaks like results day are better handled by raising <code>minReplicas</code> beforehand.</li>
+<li><b>What limits the speed:</b> the metrics delay (tens of seconds); the max of 15; free space on the nodes, since extra Pods stay <code>Pending</code> until more nodes are added, which takes minutes; image pull time and app start-up before readiness passes; and shared parts that don't scale, such as the one database every Pod talks to. Known peaks like results day are better handled by raising <code>minReplicas</code> beforehand.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> how it decides, including scale-down 2; why CPU requests are needed 1; what limits scaling speed 2.</p>
 </details></div>
@@ -308,7 +329,7 @@ spec:
 <button>The Pods have no readiness probe</button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="1" data-explain="4 × 90 / 60 = 6. The HPA scales in proportion to how far the current value is from the target, then clamps to min/max.">
+<div class="quiz" data-answer="1" data-explain="4 × 90 / 60 = 6. The HPA scales in proportion to how far the current value is from the target, then keeps it between min and max.">
 <p class="q">4. An HPA targets 60% CPU. There are 4 replicas, averaging 90%. About how many replicas will it ask for?</p>
 <button>5</button>
 <button>6</button>
@@ -319,7 +340,7 @@ spec:
 <p class="q">5. Exit question: “Why do we run PostgreSQL with a PVC, one replica and the Recreate strategy, instead of an emptyDir and three replicas?”</p>
 <textarea placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
-<p>An <code>emptyDir</code> is deleted with the Pod, and Kubernetes deletes and recreates Pods all the time, for updates, node failures and rescheduling, so the database would lose its data. A PersistentVolumeClaim asks the StorageClass for a real disk, such as an EBS volume on AWS, which lives on after the Pod and is attached to whichever Pod uses the claim. One replica, because PostgreSQL doesn't allow two servers to share one data folder: they would corrupt it, and a <code>ReadWriteOnce</code> disk can only be mounted on one node anyway. Recreate, because a rolling update would start the new Pod while the old one still holds the disk and the data files; Recreate stops the old one first, with a short downtime. For more than one copy you'd use a StatefulSet with PostgreSQL replication, or a managed database outside the cluster.</p></details>
+<p>An <code>emptyDir</code> is deleted with the Pod, and Kubernetes deletes and recreates Pods all the time, for updates, node failures and rescheduling, so the database would lose its data. A PersistentVolumeClaim asks the StorageClass for a real disk, such as an EBS volume on AWS, which lives on after the Pod and is attached to whichever Pod uses the claim. One replica, because PostgreSQL doesn't allow two servers to share one data folder: they would corrupt it, and a <code>ReadWriteOnce</code> disk can only be mounted on one node anyway. Recreate, because a rolling update would start the new Pod while the old one still holds the disk and the data files; Recreate stops the old one first, with a short downtime. For more than one copy you'd use a database the cloud provider runs for you, outside the cluster.</p></details>
 </div>
 
 <h2>Read next</h2>

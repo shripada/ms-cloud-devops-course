@@ -34,13 +34,12 @@
 
 <section>
   <h2>Pods come and go</h2>
-  <p class="lead">Kubernetes deletes and recreates Pods all the time, on any node.</p>
+  <p class="lead">Kubernetes deletes and recreates Pods all the time, on any node. Fine for a web API that keeps nothing. A disaster for a database.</p>
   <ul class="lead">
     <li class="fragment">A database that forgets every order → <b>storage</b></li>
     <li class="fragment">A backup at 2 a.m. → <b>CronJob</b></li>
     <li class="fragment">Placement results: 10× traffic → <b>autoscaling</b></li>
   </ul>
-  <p class="take">Fine for a stateless API. A disaster for a database.</p>
 </section>
 
 <!-- ============ 01 Storage ============ -->
@@ -48,6 +47,16 @@
   <div class="num">01</div>
   <h2>Storage</h2>
   <p>Data that outlives the Pod</p>
+</section>
+
+<section>
+  <h2>A Pod's volumes</h2>
+  <p class="lead">In Docker you kept PostgreSQL's data in a named volume: <code>-v pgdata:/var/lib/postgresql/data</code></p>
+  <p class="lead fragment">A Pod has volumes too: folders mounted into its containers. Two kinds today:</p>
+  <ul class="lead">
+    <li class="fragment"><b>emptyDir</b>: an empty folder made with the Pod, deleted with the Pod</li>
+    <li class="fragment"><b>PersistentVolumeClaim</b> (PVC): a request for a disk that lives on after the Pod. Like <code>pgdata</code>.</li>
+  </ul>
 </section>
 
 <section>
@@ -105,7 +114,7 @@
       <rect class="pod" x="840" y="80" width="320" height="130" rx="12"/>
       <text class="b" x="865" y="125">PersistentVolume</text>
       <text class="s" x="865" y="160">laptop: a folder on a node</text>
-      <text class="s" x="865" y="188">AWS: an EBS disk</text>
+      <text class="s" x="865" y="188">AWS: a cloud disk (EBS)</text>
     </g>
   </svg>
   <p class="lead fragment"><code>ReadWriteOnce</code>: only one node can mount it at a time.</p>
@@ -114,14 +123,46 @@
 
 <section>
   <div class="kicker">Try it · wrong way</div>
+  <h2>db.yaml, first try</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-4|10-12" data-fragment-index="0">
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.6
+      volumes:
+        - name: data
+          emptyDir: {}
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>One copy, Recreate</h3>
+        <p>Why? A few slides on.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="0">
+        <h3>The data folder</h3>
+        <p>An <code>emptyDir</code>, mounted where PostgreSQL keeps its files.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Full file in the lesson: password from db-secret.local.yaml (lesson 12 pattern), PGDATA set to a sub-folder, and the volumeMounts block shown two slides on.</aside>
+</section>
+
+<section>
+  <div class="kicker">Try it · wrong way</div>
   <h2>PostgreSQL on emptyDir</h2>
-<pre class="term"><span class="cm"># create table orders, insert (1, 'masala dosa')</span>
+<pre class="term"><span class="cm"># psql is PostgreSQL's command-line client</span>
+<span class="cm"># create table orders, insert (1, 'masala dosa')</span>
 <span class="cmd">kubectl delete pod -l app=db</span>
 <span class="cmd">kubectl exec deploy/db -- psql -U postgres -c "SELECT * FROM orders;"</span>
 <span class="bad">ERROR:  relation "orders" does not exist</span></pre>
   <p class="take">The new Pod got a brand new, empty emptyDir. Every order is gone.</p>
   <aside class="notes">
-    db.yaml: postgres:17.6, password from db-secret.local.yaml (lesson 12 pattern), PGDATA set to a sub-folder, replicas 1, strategy Recreate.
     Ask first: will the order survive a Pod delete?
   </aside>
 </section>
@@ -209,11 +250,12 @@ volumes:
     <li class="fragment">Rolling update: new Pod starts while the old one holds the disk</li>
     <li class="fragment"><b>Recreate</b> stops the old Pod first</li>
   </ul>
-  <p class="take">More copies? A StatefulSet with replication, or a managed database like Amazon RDS.</p>
+  <p class="take">Need more copies? At work, use a database the cloud provider runs for you, like Amazon RDS.</p>
 </section>
 
 <section>
   <h2>Before you delete a PVC</h2>
+  <p class="lead">The disk behind a PVC is a PersistentVolume (PV). Its <b>reclaim policy</b> says what happens next.</p>
 <pre class="term big"><span class="cmd">kubectl get pv</span>
 <span class="out">NAME          CAPACITY   RECLAIM POLICY   STATUS</span>
 <span class="out">pvc-3f9a…     1Gi        <span class="hi">Delete</span>           Bound</span></pre>
@@ -266,7 +308,7 @@ volumes:
   <div class="kicker">Try it</div>
   <h2>A backup CronJob</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-3|4|7|10|4,7,10" data-fragment-index="0">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="5,8|2-3|4|7|10|4,7,10" data-fragment-index="0">
 spec:
   schedule: "0 2 * * *"
   timeZone: "Asia/Kolkata"
@@ -283,22 +325,26 @@ spec:
 </code></pre>
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Three levels</h3>
+        <p>CronJob → <code>jobTemplate</code>: the Job → <code>template</code>: the Pod.</p>
+      </div>
+      <div class="step fragment current-visible" data-fragment-index="0">
         <h3>When</h3>
         <p>02:00 every day, India time. Without <code>timeZone</code>, it's the cluster's clock.</p>
       </div>
-      <div class="step fragment current-visible" data-fragment-index="0">
+      <div class="step fragment current-visible" data-fragment-index="1">
         <h3>Overlap</h3>
         <p>Last run still going? Skip the new one.</p>
       </div>
-      <div class="step fragment current-visible" data-fragment-index="1">
+      <div class="step fragment current-visible" data-fragment-index="2">
         <h3>Retries</h3>
         <p>2 retries, then the Job is <b>Failed</b>.</p>
       </div>
-      <div class="step fragment current-visible" data-fragment-index="2">
+      <div class="step fragment current-visible" data-fragment-index="3">
         <h3>On failure</h3>
-        <p>Retry in the same Pod. <code>Never</code> = a new Pod each time.</p>
+        <p>Restart the container in the same Pod. <code>Never</code> = a new Pod each time.</p>
       </div>
-      <div class="step fragment" data-fragment-index="3">
+      <div class="step fragment" data-fragment-index="4">
         <h3>Three settings</h3>
         <p><code>concurrencyPolicy</code><br><code>backoffLimit</code><br><code>restartPolicy</code></p>
       </div>
@@ -344,7 +390,7 @@ spec:
       <text class="s" x="10" y="210">restartPolicy: Never → a new Pod each time, so you can read every failed run's logs</text>
     </g>
   </svg>
-  <p class="take">At work, you alert on BackoffLimitExceeded.</p>
+  <p class="take">A backup that fails quietly is no backup. Check for BackoffLimitExceeded.</p>
   <aside class="notes">
     Change the command to echo disk full; exit 1 and restartPolicy to Never. kubectl describe job shows BackoffLimitExceeded.
   </aside>
@@ -358,7 +404,16 @@ spec:
 </section>
 
 <section>
-  <h2>The HorizontalPodAutoscaler</h2>
+  <h2>Who changes replicas?</h2>
+  <p class="lead">So far, you typed <code>replicas: 4</code> yourself.</p>
+  <p class="lead fragment">A <b>HorizontalPodAutoscaler</b> (<b>HPA</b>) changes it for you, based on CPU use.</p>
+  <p class="lead fragment"><b>Horizontal</b>: more Pods, not bigger Pods.</p>
+  <p class="lead fragment">It reads CPU from <b>metrics-server</b>, an add-on you install in the cluster.</p>
+  <aside class="notes">Check it's there: kubectl top nodes should print numbers.</aside>
+</section>
+
+<section>
+  <h2>How the HPA works</h2>
   <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="Loop: metrics-server reads each Pod's CPU; the HPA compares the average with its target; it changes the Deployment's replicas; the Pods change; repeat">
     <rect class="pod" x="20" y="40" width="300" height="110" rx="12"/>
     <text class="b" x="45" y="85">Pods</text>
@@ -373,7 +428,7 @@ spec:
       <path class="arrow" d="M742,95 L846,95"/>
       <rect class="cp" x="850" y="40" width="300" height="110" rx="12"/>
       <text class="b" x="875" y="85">HPA</text>
-      <text class="s" x="875" y="120">average vs target 50%</text>
+      <text class="s" x="875" y="120">average CPU vs target</text>
     </g>
     <g class="fragment">
       <path class="arrow" d="M1000,152 L1000,236"/>
@@ -388,21 +443,46 @@ spec:
 </section>
 
 <section>
+  <h2>CPU request and limit</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-3|4-5" data-fragment-index="0">
+resources:
+  requests:
+    cpu: 200m
+  limits:
+    cpu: 500m
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0">
+        <h3>Request</h3>
+        <p>CPU kept aside for the Pod on its node. <code>200m</code> = a fifth of one CPU.</p>
+      </div>
+      <div class="step fragment" data-fragment-index="0">
+        <h3>Limit</h3>
+        <p>The most the Pod may use: <code>500m</code>, half a CPU.</p>
+      </div>
+    </div>
+  </div>
+  <p class="take">m = millicores. 1000m = one CPU.</p>
+  <aside class="notes">Goes under the container, next to image. The scheduler only places a Pod on a node with that much CPU free (lesson 9).</aside>
+</section>
+
+<section>
   <h2>Percent of what?</h2>
-  <p class="lead">CPU <b>request</b>: <code>200m</code> = a fifth of one CPU</p>
-  <p class="lead fragment">Target <code>50%</code> → aim for <b>100m</b> per Pod</p>
+  <p class="lead">CPU % = CPU used ÷ CPU <b>request</b></p>
+  <p class="lead fragment">Target <code>50%</code> of 200m → aim for <b>100m</b> per Pod</p>
+  <p class="lead fragment">Using 500m (its limit) → <b>250%</b>. Over 100% is normal.</p>
   <div class="card bad fragment" style="margin-top:30px">
     <p class="lead" style="margin:0">No request → nothing to divide by → the HPA can't measure.</p>
   </div>
-  <aside class="notes">m = millicores. 1000m = one CPU.</aside>
 </section>
 
 <section>
   <h2>How many Pods?</h2>
   <p class="lead">wanted = current replicas × current CPU ÷ target</p>
-  <p class="huge fragment">4 × 90 ÷ 60 = 6</p>
-  <p class="lead fragment">Rounded up, kept between <code>minReplicas</code> and <code>maxReplicas</code>.</p>
-  <p class="take">By default, scale-down waits 5 minutes of low CPU, so a short dip doesn't flap.</p>
+  <p class="huge fragment">1 × 250 ÷ 50 = 5</p>
+  <p class="lead fragment">Rounded up, kept between the minimum and maximum you set.</p>
+  <p class="take">By default, scale-down waits 5 minutes of low CPU, so a short dip doesn't make it shrink and grow again.</p>
 </section>
 
 <section>
@@ -428,10 +508,10 @@ spec:
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0">
         <h3>What to scale</h3>
-        <p>The <code>php-apache</code> Deployment.</p>
+        <p>The <code>php-apache</code> Deployment: a demo app from the Kubernetes docs that burns CPU on every request.</p>
       </div>
       <div class="step fragment current-visible" data-fragment-index="0">
-        <h3>Limits</h3>
+        <h3>Min and max</h3>
         <p>Between 1 and 6 Pods.</p>
       </div>
       <div class="step fragment" data-fragment-index="1">
@@ -451,7 +531,7 @@ spec:
 <section>
   <div class="kicker">Try it</div>
   <h2>Create a rush</h2>
-<pre class="term"><span class="cm"># second terminal: a load generator calling http://php-apache</span>
+<pre class="term"><span class="cm"># second terminal: a busybox Pod calling http://php-apache in a loop</span>
 <span class="cmd">kubectl get hpa php-apache -w</span>
 <span class="out">NAME         TARGETS          MINPODS   MAXPODS   REPLICAS</span>
 <span class="out">php-apache   cpu: 0%/50%      1         6         1</span>
@@ -474,7 +554,7 @@ spec:
 <span class="cmd">kubectl describe hpa php-apache</span>
 <span class="bad">… missing request for cpu</span></pre>
   <p class="take">No request, no 100% to measure against. The HPA does nothing.</p>
-  <aside class="notes">Delete the resources: block (three lines) and apply. Clean up: kubectl delete -f hpa.yaml.</aside>
+  <aside class="notes">Delete the resources: block (five lines) and apply. Clean up: kubectl delete -f hpa.yaml.</aside>
 </section>
 
 <section>
@@ -482,7 +562,7 @@ spec:
   <ul class="lead">
     <li>Checks every 15 s; metrics are a little behind</li>
     <li class="fragment">Each new Pod: schedule, pull image, start, pass readiness</li>
-    <li class="fragment">Full nodes → <code>Pending</code> until a cluster autoscaler adds nodes (minutes)</li>
+    <li class="fragment">Full nodes → new Pods stay <code>Pending</code> until more nodes are added (minutes)</li>
   </ul>
   <p class="take">For a known sale or results day, raise minReplicas before it starts.</p>
 </section>
