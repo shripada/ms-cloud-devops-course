@@ -111,7 +111,7 @@ kubectl rollout status deployment/api
 kubectl get gatewayclass,gateway,httproute
 kubectl describe gateway shop
 kubectl describe httproute shop</code></pre>
-The <code>Gateway</code> should become <code>Accepted</code> and <code>Programmed</code>; the <code>HTTPRoute</code> should show that its parent accepted it. Envoy Gateway also creates an Envoy Proxy Deployment and a LoadBalancer Service for this Gateway.</li>
+The <code>Gateway</code> should become <code>Accepted</code>; the <code>HTTPRoute</code> should show that its parent accepted it. The Gateway becomes <code>Programmed</code> only once it has an address. Until a load balancer gives it one (on minikube, until <code>minikube tunnel</code> runs), <code>Programmed</code> stays <code>False</code> with reason <code>AddressNotAssigned</code>. Envoy Gateway also creates an Envoy Proxy Deployment and a LoadBalancer Service for this Gateway.</li>
 <li>Find that LoadBalancer Service:
 <pre><code>kubectl get service -n envoy-gateway-system \
   -l gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=shop</code></pre>
@@ -128,7 +128,7 @@ kubectl port-forward -n envoy-gateway-system service/$ENVOY_SERVICE 8080:80</cod
 This fallback enters through Envoy and exercises the Gateway and HTTPRoute, but bypasses the external load balancer. Back in the first terminal, send requests with the <code>Host</code> header:
 <pre><code>curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname
 curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname
-curl -s -H "Host: other.local" http://localhost:8080/ | head -3</code></pre>
+curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.local" http://localhost:8080/</code></pre>
 The first answers from a <code>web-…</code> Pod, the second from an <code>api-…</code> Pod, and the third gets 404 because no route matches that hostname. One Envoy entry point routes to both internal Services.</li>
 <li>Break the route twice. First, change the <code>/</code> match from <code>PathPrefix</code> to <code>Exact</code>, apply, and try <code>/</code> and <code>/about</code>. Only <code>/</code> works. Restore <code>PathPrefix</code>. Second, change the HTTPRoute's <code>parentRefs</code> name from <code>shop</code> to <code>missing</code> and apply. <code>kubectl describe httproute shop</code> no longer shows an accepted attachment to the working Gateway, and the route is not programmed. Restore <code>shop</code>, apply, and wait for the accepted status.</li>
 </ol>
@@ -206,7 +206,7 @@ kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- \
 <pre><code>kubectl config get-contexts
 kubectl config current-context
 kubectl config view --minify</code></pre>
-The <code>*</code> marks the current context. When you later run <code>aws eks update-kubeconfig --name shop-prod</code>, it adds a second context to this file. Then <code>kubectl config use-context &lt;name&gt;</code> switches, and <code>kubectl --context &lt;name&gt; get pods</code> runs one command against the other cluster. The habit that saves careers: check the current context before any <code>delete</code>.</li>
+The <code>*</code> marks the current context. When you later run <code>aws eks update-kubeconfig --name shop-prod --alias shop-prod</code>, it adds a second context named <code>shop-prod</code> to this file. Without <code>--alias</code>, the context is named after the cluster's ARN. Then <code>kubectl config use-context &lt;name&gt;</code> switches, and <code>kubectl --context &lt;name&gt; get pods</code> runs one command against the other cluster. Check the current context before any <code>delete</code>.</li>
 </ol>
 <table>
 <tr><th>Option</th><th>What it is</th><th>Good for</th></tr>
@@ -234,7 +234,7 @@ kubectl get pods -l app=big
 kubectl describe pod -l app=big | grep -A3 Events</code></pre>
 Read it piece by piece: <code>0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 2 Insufficient memory</code>. That's all three nodes explained: the control plane node is tainted so normal Pods stay off it (lesson 9), and neither worker has 64 GiB free. Fix: ask for a sensible amount (or add bigger nodes). <code>kubectl delete deployment big</code>.</li>
 <li>One more pattern to recognise: an API's logs say <code>connect ECONNREFUSED 127.0.0.1:5432</code>. Inside a Pod, <code>127.0.0.1</code> (localhost) is the Pod itself, and the database runs in a different Pod. The app must use the database's Service name, like <code>db</code> or <code>db.shop.svc.cluster.local</code>, usually set through a ConfigMap. It works when the app and database both run straight on your laptop, then breaks in the cluster, so it shows up in nearly every first deploy.</li>
-<li>Clean up everything from today. Stop the port-forward or minikube tunnel with Ctrl+C, then delete the application, Services and routing objects from their authoritative file: <code>kubectl delete -f shop.yaml</code>. To remove Envoy Gateway and its CRDs too, run <code>kubectl delete -f https://github.com/envoyproxy/gateway/releases/download/v1.9.2/install.yaml</code>.</li>
+<li>Clean up everything. Stop the port-forward or minikube tunnel with Ctrl+C, then delete the application, Services and routing objects from their authoritative file: <code>kubectl delete -f shop.yaml</code>. To remove Envoy Gateway and its CRDs too, run <code>kubectl delete -f https://github.com/envoyproxy/gateway/releases/download/v1.9.2/install.yaml</code>.</li>
 </ol>
 
 <div class="trap"><b>Drill: spot the problems.</b> This HTTPRoute should attach to the <code>fest</code> Gateway, send everything for <code>fest.example.com</code> to the <code>site</code> Service, and send everything under <code>/tickets</code> to the <code>tickets</code> Service. Both Services listen on port 80. Find three errors.

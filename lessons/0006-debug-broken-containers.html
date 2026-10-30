@@ -116,7 +116,7 @@ It stops with no Python error at all. The logs are empty too. This is the hardes
 <pre><code>docker rm hungry</code></pre></li>
 </ol>
 
-<div class="box"><b>Stretch:</b> run <code>docker run -d --name quick alpine echo hello</code>, then <code>docker ps -a</code>. It shows <code>Exited (0)</code>. Nothing crashed: <code>echo</code> finished, so PID 1 ended, so the container stopped. Beginners often think this is a bug. Now go back to lesson 5's <code>visits</code> app, change <code>REDIS_HOST</code> to a wrong name, and debug it with only <code>docker compose ps</code>, <code>docker compose logs</code> and <code>docker compose exec web sh</code>. The Compose commands work like the ones you learnt today.</div>
+<div class="box"><b>Stretch:</b> run <code>docker run -d --name quick alpine echo hello</code>, then <code>docker ps -a</code>. It shows <code>Exited (0)</code>. Nothing crashed: <code>echo</code> finished, so PID 1 ended, so the container stopped. Beginners often think this is a bug. Now go back to lesson 5's <code>visits</code> app, change <code>REDIS_HOST</code> to a wrong name, and debug it with only <code>docker compose ps</code>, <code>docker compose logs</code> and <code>docker compose exec web sh</code>. The Compose commands work like the Docker ones above.</div>
 
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking. Getting it wrong first is fine. That struggle is what makes it stay in your head.</p>

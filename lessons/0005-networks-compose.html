@@ -4,7 +4,7 @@
 <h1>Networks &amp; Compose</h1>
 
 <h2>Why this matters for DevOps</h2>
-<p>Real apps are never one container. There is at least an app and a database, often a cache and a background worker too. Typing four long <code>docker run</code> commands in the right order, with the right network and volume flags, is slow and easy to get wrong. Docker Compose writes the whole setup down in one file that lives in Git next to the code. On your first day in a company, “clone the repo and run <code>docker compose up</code>” is very often step one. Kubernetes files in module 2 will look familiar because of today.</p>
+<p>Real apps are never one container. There is at least an app and a database, often a cache and a background worker too. Typing four long <code>docker run</code> commands in the right order, with the right network and volume flags, is slow and easy to get wrong. Docker Compose writes the whole setup down in one file that lives in Git next to the code. On your first day in a company, “clone the repo and run <code>docker compose up</code>” is very often step one. Kubernetes files in module 2 will look familiar because of it.</p>
 
 <h2>Three ideas, no more</h2>
 <p><b>Containers on the same user-defined network find each other by name.</b> You create a network with <code>docker network create</code> and attach containers to it. Docker runs a small DNS server for that network, so a container called <code>redis</code> is reachable at the hostname <code>redis</code>. You never hard-code an IP address. IPs change every time a container is recreated; names don't. <a href="https://docs.docker.com/engine/network/">[Docker docs: networking]</a></p>

@@ -27,7 +27,7 @@ uv venv -p 3.13 ~/ansible-env
 source ~/ansible-env/bin/activate
 uv pip install ansible kubernetes
 ansible --version</code></pre>
-<p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal today. Make a folder, <code>config-demo</code>, and work in it.</p>
+<p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal. Make a folder, <code>config-demo</code>, and work in it.</p>
 <p>We need some machines to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. Everything else works exactly as it would with real servers.</p>
 <pre><code>for h in runner1 runner2 stage1; do
   docker run -d --name $h python:3.13-slim sleep infinity

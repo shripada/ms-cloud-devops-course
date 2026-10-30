@@ -4,7 +4,7 @@
 <h1>Ports &amp; persistent data</h1>
 
 <h2>Why this matters for DevOps</h2>
-<p>Containers are meant to be thrown away. You delete one and start a fresh one every time you deploy. That is fine for your app's code, but not for your users' data. If the database container is deleted and the student records go with it, that is a real production incident. Every Kubernetes and cloud setup you will see later is built on today's two ideas: how traffic gets <em>into</em> a container, and where data lives <em>outside</em> it.</p>
+<p>Containers are meant to be thrown away. You delete one and start a fresh one every time you deploy. That is fine for your app's code, but not for your users' data. If the database container is deleted and the student records go with it, that is a real production incident. Every Kubernetes and cloud setup you will see later is built on two ideas: how traffic gets <em>into</em> a container, and where data lives <em>outside</em> it.</p>
 
 <h2>Three ideas, no more</h2>
 <p><b><code>-p HOST:CONTAINER</code> is a forwarding rule.</b> A container has its own private network, like a hostel room with its own internal phone line. <code>-p 8080:80</code> tells Docker: “anything that arrives at port 8080 on my Mac, forward it to port 80 inside the container.” The left number is yours to choose. The right number is whatever the app listens on. You already met the other half of this in lesson 3: <code>EXPOSE</code> only documents a port, and <code>-p</code> actually opens it. <a href="https://docs.docker.com/engine/network/port-publishing/">[Docker docs: port publishing]</a></p>

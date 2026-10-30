@@ -33,13 +33,17 @@
 </section>
 
 <section>
-  <h2>Pods come and go</h2>
-  <p class="lead">Kubernetes deletes and recreates Pods all the time, on any node. Fine for a web API that keeps nothing. A disaster for a database.</p>
-  <ul class="lead">
-    <li class="fragment">A database that forgets every order → <b>storage</b></li>
-    <li class="fragment">A backup at 2 a.m. → <b>CronJob</b></li>
-    <li class="fragment">Placement results: 10× traffic → <b>autoscaling</b></li>
-  </ul>
+  <h2>Three problems with the canteen app</h2>
+  <p class="lead">The college canteen's ordering app runs on Kubernetes: a web API and a PostgreSQL database. Three things go wrong.</p>
+  <table>
+    <tr><th>Problem</th><th>Fix</th></tr>
+    <tr class="fragment"><td>Kubernetes recreates the database Pod, and every order is gone</td><td><b>01 Storage</b></td></tr>
+    <tr class="fragment"><td>The database needs a backup at 2 a.m., every night</td><td><b>02 Jobs</b></td></tr>
+    <tr class="fragment"><td>At 1 p.m. lunch, orders jump 10×; after lunch, they drop</td><td><b>03 Autoscaling</b></td></tr>
+  </table>
+  <aside class="notes">
+    Kubernetes deletes and recreates Pods all the time, on any node. Fine for the web API, which keeps nothing. A disaster for the database.
+  </aside>
 </section>
 
 <!-- ============ 01 Storage ============ -->
@@ -52,7 +56,7 @@
 <section>
   <h2>A Pod's volumes</h2>
   <p class="lead">In Docker you kept PostgreSQL's data in a named volume: <code>-v pgdata:/var/lib/postgresql/data</code></p>
-  <p class="lead fragment">A Pod has volumes too: folders mounted into its containers. Two kinds today:</p>
+  <p class="lead fragment">A Pod has volumes too: folders mounted into its containers. Two kinds:</p>
   <ul class="lead">
     <li class="fragment"><b>emptyDir</b>: an empty folder made with the Pod, deleted with the Pod</li>
     <li class="fragment"><b>PersistentVolumeClaim</b> (PVC): a request for a disk that lives on after the Pod. Like <code>pgdata</code>.</li>
@@ -76,6 +80,7 @@
     <g class="fragment semi-fade-out" data-fragment-index="0">
       <rect class="pod" x="640" y="60" width="240" height="120" rx="14"/>
       <text class="b" x="665" y="130">old Pod</text>
+      <path class="arrow" d="M760,182 L840,276"/>
     </g>
     <g class="fragment" data-fragment-index="0">
       <path class="cross" d="M660,75 L860,165 M860,75 L660,165"/>
@@ -85,7 +90,6 @@
       <text class="b acc" x="935" y="130">new Pod</text>
       <path class="arrow acc" d="M1030,182 L960,276"/>
     </g>
-    <path class="arrow" d="M760,182 L840,276"/>
     <rect class="svc" x="700" y="280" width="390" height="110" rx="14"/>
     <text class="b" x="725" y="325">disk</text>
     <text class="s" x="725" y="360">lives on after the Pod</text>
@@ -123,7 +127,7 @@
 
 <section>
   <div class="kicker">Try it · wrong way</div>
-  <h2>db.yaml, first try</h2>
+  <h2>The orders database, first try</h2>
   <div class="cols wide-left">
 <pre class="yaml big"><code class="language-yaml" data-trim data-line-numbers="2-4|10-12" data-fragment-index="0">
 spec:
@@ -142,11 +146,11 @@ spec:
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0">
         <h3>One copy, Recreate</h3>
-        <p>Why? A few slides on.</p>
+        <p>One database Pod. On an update, stop the old Pod before starting the new one.</p>
       </div>
       <div class="step fragment" data-fragment-index="0">
         <h3>The data folder</h3>
-        <p>An <code>emptyDir</code>, mounted where PostgreSQL keeps its files.</p>
+        <p>An <code>emptyDir</code>, mounted where PostgreSQL keeps its files (the <code>volumeMounts</code> part is a few slides on).</p>
       </div>
     </div>
   </div>
@@ -159,11 +163,13 @@ spec:
 <pre class="term"><span class="cm"># psql is PostgreSQL's command-line client</span>
 <span class="cm"># create table orders, insert (1, 'masala dosa')</span>
 <span class="cmd">kubectl delete pod -l app=db</span>
+<span class="cmd">kubectl rollout status deployment/db</span>
 <span class="cmd">kubectl exec deploy/db -- psql -U postgres -c "SELECT * FROM orders;"</span>
 <span class="bad">ERROR:  relation "orders" does not exist</span></pre>
   <p class="take">The new Pod got a brand new, empty emptyDir. Every order is gone.</p>
   <aside class="notes">
     Ask first: will the order survive a Pod delete?
+    If psql says "the database system is starting up", wait a few seconds and run it again.
   </aside>
 </section>
 
@@ -234,11 +240,13 @@ volumes:
 <pre class="term"><span class="cmd">kubectl get pvc</span>
 <span class="out">NAME      STATUS   CAPACITY   ACCESS MODES</span>
 <span class="out">db-data   <span class="ok">Bound</span>    1Gi        RWO</span>
+<span class="cm"># the new disk starts empty: create table, insert (1, 'masala dosa') again</span>
 <span class="cmd">kubectl delete pod -l app=db</span>
+<span class="cmd">kubectl rollout status deployment/db</span>
 <span class="cmd">kubectl exec deploy/db -- psql -U postgres -c "SELECT * FROM orders;"</span>
 <span class="out"> id |    item</span>
 <span class="out">  1 | <span class="ok">masala dosa</span></span></pre>
-  <p class="take">On a laptop the new Pod lands on the same node. On AWS the disk moves to the new node.</p>
+  <p class="take">On most laptop clusters the new Pod lands on the same node. On AWS the disk moves to the new node, within the same zone.</p>
   <aside class="notes">Run kubectl get pod -l app=db -o wide before and after the delete.</aside>
 </section>
 
@@ -251,6 +259,7 @@ volumes:
     <li class="fragment"><b>Recreate</b> stops the old Pod first</li>
   </ul>
   <p class="take">Need more copies? At work, use a database the cloud provider runs for you, like Amazon RDS.</p>
+  <aside class="notes">Interview keyword: a StatefulSet gives each copy its own PVC, but the database still has to copy data between them itself.</aside>
 </section>
 
 <section>
@@ -263,7 +272,7 @@ volumes:
     <tr><td><code>Delete</code></td><td>Deleting the PVC deletes the disk and the data</td></tr>
     <tr class="fragment"><td><code>Retain</code></td><td>The disk stays, for manual recovery</td></tr>
   </table>
-  <aside class="notes">Clean up later: kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml.</aside>
+  <p class="take fragment">The data survives a Pod delete, not a PVC delete.</p>
 </section>
 
 <!-- ============ 02 Jobs ============ -->
@@ -294,7 +303,7 @@ volumes:
     <g class="fragment">
       <text class="b" x="40" y="185" style="font-size:28px">minute</text>
       <text class="b" x="280" y="185" style="font-size:28px">hour</text>
-      <text class="b" x="520" y="185" style="font-size:28px">day</text>
+      <text class="b" x="500" y="185" style="font-size:28px">day of month</text>
       <text class="b" x="730" y="185" style="font-size:28px">month</text>
       <text class="b" x="945" y="185" style="font-size:28px">weekday</text>
     </g>
@@ -330,7 +339,7 @@ spec:
       </div>
       <div class="step fragment current-visible" data-fragment-index="0">
         <h3>When</h3>
-        <p>02:00 every day, India time. Without <code>timeZone</code>, it's the cluster's clock.</p>
+        <p>02:00 every day, India time. Without <code>timeZone</code>, it's the cluster's clock, often UTC: 07:30 in India.</p>
       </div>
       <div class="step fragment current-visible" data-fragment-index="1">
         <h3>Overlap</h3>
@@ -392,7 +401,12 @@ spec:
   </svg>
   <p class="take">A backup that fails quietly is no backup. Check for BackoffLimitExceeded.</p>
   <aside class="notes">
-    Change the command to echo disk full; exit 1 and restartPolicy to Never. kubectl describe job shows BackoffLimitExceeded.
+    Change the command to echo disk full; exit 1 and restartPolicy to Never, and apply.
+    Start one run by hand: kubectl create job backup-test --from=cronjob/backup
+    Watch only its Pods: kubectl get pods -l job-name=backup-test -w
+    Retries wait 10 s, then 20 s, so allow about a minute. The CronJob keeps starting its own failing run every minute; that's why we filter by job-name.
+    kubectl describe job backup-test shows BackoffLimitExceeded.
+    Clean up: kubectl delete job backup-test, then kubectl delete -f backup.yaml -f db.yaml -f db-secret.local.yaml (this deletes the PVC and the orders).
   </aside>
 </section>
 
@@ -409,7 +423,12 @@ spec:
   <p class="lead fragment">A <b>HorizontalPodAutoscaler</b> (<b>HPA</b>) changes it for you, based on CPU use.</p>
   <p class="lead fragment"><b>Horizontal</b>: more Pods, not bigger Pods.</p>
   <p class="lead fragment">It reads CPU from <b>metrics-server</b>, an add-on you install in the cluster.</p>
-  <aside class="notes">Check it's there: kubectl top nodes should print numbers.</aside>
+  <aside class="notes">
+    Check it's there: kubectl top nodes should print numbers.
+    If "Metrics API not available": on minikube, minikube addons enable metrics-server.
+    Elsewhere: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
+    then add --kubelet-insecure-tls to its args on a laptop cluster (exact patch command in the lesson, step 9).
+  </aside>
 </section>
 
 <section>
@@ -455,11 +474,11 @@ resources:
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0">
         <h3>Request</h3>
-        <p>CPU kept aside for the Pod on its node. <code>200m</code> = a fifth of one CPU.</p>
+        <p>CPU kept aside for the container on its node. <code>200m</code> = a fifth of one CPU.</p>
       </div>
       <div class="step fragment" data-fragment-index="0">
         <h3>Limit</h3>
-        <p>The most the Pod may use: <code>500m</code>, half a CPU.</p>
+        <p>The most the container may use: <code>500m</code>, half a CPU.</p>
       </div>
     </div>
   </div>
@@ -473,7 +492,7 @@ resources:
   <p class="lead fragment">Target <code>50%</code> of 200m → aim for <b>100m</b> per Pod</p>
   <p class="lead fragment">Using 500m (its limit) → <b>250%</b>. Over 100% is normal.</p>
   <div class="card bad fragment" style="margin-top:30px">
-    <p class="lead" style="margin:0">No request → nothing to divide by → the HPA can't measure.</p>
+    <p class="lead" style="margin:0">No request → nothing to divide by → the HPA can't work out a percent.</p>
   </div>
 </section>
 
@@ -523,7 +542,7 @@ spec:
   </div>
   <aside class="notes">
     Top of the object: apiVersion: autoscaling/v2, kind: HorizontalPodAutoscaler, name: php-apache.
-    hpa.yaml also has the Deployment (requests cpu 200m, limits 500m) and a Service. Image registry.k8s.io/hpa-example from the Kubernetes docs.
+    hpa.yaml also has the Deployment (requests cpu 200m, limits 500m) and a Service. Image registry.k8s.io/hpa-example from the Kubernetes docs, pinned by digest because it only has a latest tag.
     Needs metrics-server: kubectl top nodes should print numbers.
   </aside>
 </section>
@@ -536,12 +555,13 @@ spec:
 <span class="out">NAME         TARGETS          MINPODS   MAXPODS   REPLICAS</span>
 <span class="out">php-apache   cpu: 0%/50%      1         6         1</span>
 <span class="out">php-apache   cpu: <span class="bad">250%</span>/50%    1         6         1</span>
-<span class="out">php-apache   cpu: 120%/50%    1         6         <span class="hi">4</span></span>
-<span class="out">php-apache   cpu: 52%/50%     1         6         <span class="hi">5</span></span></pre>
+<span class="out">php-apache   cpu: 250%/50%    1         6         <span class="hi">5</span></span>
+<span class="out">php-apache   cpu: 48%/50%     1         6         <span class="hi">5</span></span></pre>
   <p class="take">Stop the load: replicas come down only after about 5 minutes.</p>
   <aside class="notes">
     Load: kubectl run load --rm -it --image=busybox:1.36 --restart=Never -- sh -c "while sleep 0.01; do wget -qO- http://php-apache; done"
-    Ask first: how many replicas will you get? Numbers vary.
+    Ask first: how many replicas will you get? Numbers vary with the laptop's CPU, often 4–6.
+    The second 250% row is the metrics catching up: CPU still reads high for a moment after the new Pods start.
   </aside>
 </section>
 
@@ -553,7 +573,7 @@ spec:
 <span class="out">cpu: <span class="bad">&lt;unknown&gt;</span>/50%</span>
 <span class="cmd">kubectl describe hpa php-apache</span>
 <span class="bad">… missing request for cpu</span></pre>
-  <p class="take">No request, no 100% to measure against. The HPA does nothing.</p>
+  <p class="take">CPU % = CPU used ÷ request. No request, no percent, so the HPA never adds Pods.</p>
   <aside class="notes">Delete the resources: block (five lines) and apply. Clean up: kubectl delete -f hpa.yaml.</aside>
 </section>
 
@@ -562,7 +582,7 @@ spec:
   <ul class="lead">
     <li>Checks every 15 s; metrics are a little behind</li>
     <li class="fragment">Each new Pod: schedule, pull image, start, pass readiness</li>
-    <li class="fragment">Full nodes → new Pods stay <code>Pending</code> until more nodes are added (minutes)</li>
+    <li class="fragment">Full nodes → new Pods stay <code>Pending</code> until a cluster autoscaler adds nodes (minutes)</li>
   </ul>
   <p class="take">For a known sale or results day, raise minReplicas before it starts.</p>
 </section>

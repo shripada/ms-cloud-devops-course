@@ -4,7 +4,7 @@
 <h1>Under the hood</h1>
 
 <h2>Why this matters for DevOps</h2>
-<p>“What is the difference between a container and a virtual machine?” is asked in almost every Cloud and DevOps interview. Most candidates say “containers are lightweight VMs”, which is wrong, and the interviewer knows it. Today you will see the real answer with your own eyes. It also explains things you have already met: why lesson 6's container got <code>OOMKilled</code>, why each container can use port 80, and why a container stops when PID 1 ends.</p>
+<p>“What is the difference between a container and a virtual machine?” is asked in almost every Cloud and DevOps interview. Most candidates say “containers are lightweight VMs”, which is wrong, and the interviewer knows it. You will see the real answer with your own eyes. It also explains things you have already met: why lesson 6's container got <code>OOMKilled</code>, why each container can use port 80, and why a container stops when PID 1 ends.</p>
 
 <h2>Three ideas, no more</h2>
 <p><b>A container is a process, not a machine.</b> When you start a container, Docker asks the Linux kernel to start an ordinary process, the same kind you studied in your OS course. There is no second operating system booting. That is why a container starts in under a second and a VM takes a minute.</p>

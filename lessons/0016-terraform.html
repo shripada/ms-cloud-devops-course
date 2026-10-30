@@ -19,11 +19,11 @@
 <tr><td>CloudFormation / CDK</td><td>AWS-only shops; AWS manages the state for you</td><td>AWS only: can't also manage Cloudflare DNS or GitHub</td></tr>
 <tr><td>Terraform / OpenTofu</td><td>Any cloud or service through providers; <code>plan</code> preview; one workflow everywhere</td><td>You must look after the state file</td></tr>
 </table>
-<p>OpenTofu is an open-source fork of Terraform with the same language and commands (<code>tofu plan</code>). Everything today works with either.</p>
+<p>OpenTofu is an open-source fork of Terraform with the same language and commands (<code>tofu plan</code>). Everything here works with either.</p>
 
 <h2>Before you start</h2>
 <p>Docker Desktop running. Install Terraform: on macOS <code>brew install hashicorp/tap/terraform</code>, on Windows <code>winget install Hashicorp.Terraform</code>. Check with <code>terraform version</code>. Make a new folder, <code>iac-demo</code>, and open it in your editor.</p>
-<p>One macOS trap first. The Docker provider looks for Docker at <code>/var/run/docker.sock</code>, and Docker Desktop on macOS doesn't create that file unless you turn on a setting. Point the provider at the right place, in every terminal you use today:</p>
+<p>One macOS trap first. The Docker provider looks for Docker at <code>/var/run/docker.sock</code>, and Docker Desktop on macOS doesn't create that file unless you turn on a setting. Point the provider at the right place, in every terminal you use:</p>
 <pre><code>export DOCKER_HOST=$(docker context inspect -f '{{.Endpoints.docker.Host}}')
 echo $DOCKER_HOST</code></pre>
 <p>Without this, <code>apply</code> fails with <code>Cannot connect to the Docker daemon at unix:///var/run/docker.sock</code>. Windows users can skip this step.</p>
@@ -113,7 +113,7 @@ It holds every setting of every resource, in plain text. On AWS that includes da
     use_lockfile = true
   }
 }</code></pre>
-The bucket is encrypted and only the team and the CI pipeline can read it. <code>use_lockfile</code> makes Terraform write a lock object next to the state during <code>plan</code> and <code>apply</code>. If Priya is applying and Arjun runs apply too, Arjun gets <code>Error acquiring the state lock</code> and waits, instead of both writing the state at once and corrupting it. (Older setups use a DynamoDB table for the lock; you'll see both.) We don't run this today: it needs an AWS account.</li>
+The bucket is encrypted and only the team and the CI pipeline can read it. <code>use_lockfile</code> makes Terraform write a lock object next to the state during <code>plan</code> and <code>apply</code>. If Priya is applying and Arjun runs apply too, Arjun gets <code>Error acquiring the state lock</code> and waits, instead of both writing the state at once and corrupting it. (Older setups use a DynamoDB table for the lock; you'll see both.) You won't run this: it needs an AWS account.</li>
 <li>Same code, second environment. A <em>workspace</em> gives the same code a separate state:
 <pre><code>terraform workspace new prod
 terraform apply -var env=prod -var port=8090
@@ -129,7 +129,7 @@ Nothing left. On AWS, <code>destroy</code> at the end of a practice session is w
 </ol>
 
 <h2>What the AWS version looks like</h2>
-<p>You won't run this today, but read it: it's the same shape. A provider, variables, and resources that refer to each other. (Real EKS code usually uses the community <code>terraform-aws-modules/eks</code> module rather than writing every resource.)</p>
+<p>You won't run this, but read it: it's the same shape. A provider, variables, and resources that refer to each other. (Real EKS code usually uses the community <code>terraform-aws-modules/eks</code> module rather than writing every resource.)</p>
 <pre><code>provider "aws" { region = "ap-south-1" }
 
 variable "node_count"    { type = number }

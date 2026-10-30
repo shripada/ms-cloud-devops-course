@@ -34,12 +34,24 @@
 
 <section>
   <h2>Three problems at work</h2>
-  <ul class="lead">
-    <li>Frontend, API and more, behind <b>one</b> website address</li>
-    <li class="fragment">Dev, testing and other teams share <b>one</b> cluster</li>
-    <li class="fragment">Every week something is <code>Pending</code> or <code>CrashLoopBackOff</code></li>
-  </ul>
-  <p class="take fragment">The person who finds out why in two minutes is the one the team calls.</p>
+  <p class="lead">You run an online shop on Kubernetes. It has two Services: <code>web</code> (the pages) and <code>api</code> (the orders).</p>
+  <div class="cols three">
+    <div class="card bad fragment">
+      <h3>Two addresses</h3>
+      <p>Each LoadBalancer Service gets its own IP address.</p>
+      <p class="muted" style="margin:0">Customers should type just one: <code>shop.local</code></p>
+    </div>
+    <div class="card bad fragment">
+      <h3>A shared cluster</h3>
+      <p>The testing team runs its Pods on your cluster too.</p>
+      <p class="muted" style="margin:0">Their Pods can use up all the memory, and yours can't start</p>
+    </div>
+    <div class="card bad fragment">
+      <h3>A broken Pod</h3>
+      <p>A Pod shows <code>CrashLoopBackOff</code>.</p>
+      <p class="muted" style="margin:0">Where do you even start looking?</p>
+    </div>
+  </div>
 </section>
 
 <!-- ============ 01 Gateway API ============ -->
@@ -70,15 +82,23 @@
   <h2>Three objects</h2>
   <table>
     <tr><th>Object</th><th>Says</th></tr>
-    <tr><td><code>GatewayClass</code></td><td>Which implementation runs the gate</td></tr>
-    <tr class="fragment"><td><code>Gateway</code></td><td>Listeners, e.g. HTTP on port 80</td></tr>
+    <tr><td><code>GatewayClass</code></td><td>Which software runs the gate</td></tr>
+    <tr class="fragment"><td><code>Gateway</code></td><td>What it listens for, e.g. HTTP on port 80</td></tr>
     <tr class="fragment"><td><code>HTTPRoute</code></td><td>Host + path → which Service</td></tr>
   </table>
   <p class="take">An apartment's main gate: the security company, the gate, and the visitor register.</p>
   <aside class="notes">
     GatewayClass = the security company named in the contract. Gateway = the gate. HTTPRoute = the register: "visitors for flat 4B, go to Tower A".
-    Envoy Proxy is the guard who handles each visitor. The older Ingress API is frozen but not removed; Kubernetes recommends Gateway API for new work.
+    The older Ingress API is frozen but not removed; Kubernetes recommends Gateway API for new work.
   </aside>
+</section>
+
+<section>
+  <h2>Who does the work?</h2>
+  <p class="lead">The three objects are only a description. Something must read them and pass on each request.</p>
+  <p class="lead fragment">Ours is <b>Envoy Gateway</b>, a controller: it reads the objects.</p>
+  <p class="lead fragment">It starts <b>Envoy Proxy</b> Pods: they take each request and send it to the right Service.</p>
+  <p class="take fragment">At the main gate: Envoy Proxy is the guard who handles each visitor.</p>
 </section>
 
 <section>
@@ -161,7 +181,7 @@ spec:
       </div>
       <div class="step fragment" data-fragment-index="2">
         <h3>Who may attach</h3>
-        <p>Routes in the same namespace.</p>
+        <p>Only HTTPRoutes in the Gateway's own namespace.</p>
       </div>
     </div>
   </div>
@@ -200,6 +220,7 @@ spec:
       </div>
     </div>
   </div>
+  <p class="take fragment">Every request carries the site name it asked for, in a <b>Host</b> header. That's how one address serves many sites.</p>
 </section>
 
 <section>
@@ -238,8 +259,25 @@ rules:
       </div>
     </div>
   </div>
+  <p class="take">The most specific match wins, so <code>/api</code> beats <code>/</code>. Order in the file doesn't matter.</p>
   <aside class="notes">
     web and api are ordinary Deployments of traefik/whoami:v1.11 with ClusterIP Services, all in shop.yaml.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Try it</div>
+  <h2>Apply and check</h2>
+<pre class="term"><span class="cm"># shop.yaml: the web and api Deployments and Services, the Gateway, the HTTPRoute</span>
+<span class="cm"># web and api run whoami: a tiny app that replies with its Pod's name</span>
+<span class="cmd">kubectl apply -f shop.yaml</span>
+<span class="cmd">kubectl get gateway shop</span>
+<span class="out">NAME   CLASS   ADDRESS     PROGRAMMED</span>
+<span class="out">shop   eg      127.0.0.1   <span class="ok">True</span></span></pre>
+  <p class="take"><b>Programmed</b> = Envoy Proxy is set up and the Gateway has an address.</p>
+  <aside class="notes">
+    kubectl describe httproute shop should show the parent Gateway accepted the route.
+    No load balancer (e.g. minikube without minikube tunnel): ADDRESS stays empty and PROGRAMMED is False with reason AddressNotAssigned. Routing still works through port-forward.
   </aside>
 </section>
 
@@ -274,11 +312,13 @@ rules:
 <section>
   <div class="kicker">Try it</div>
   <h2>Send requests with a Host header</h2>
-<pre class="term"><span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname</span>
+<pre class="term"><span class="cm"># second terminal: port-forward Envoy's Service to localhost:8080 (lesson step)</span>
+<span class="cm"># -H sets the Host header</span>
+<span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname</span>
 <span class="out">Hostname: <span class="hi">web</span>-6b7f9c4d8-x2k4q</span>
 <span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname</span>
 <span class="out">Hostname: <span class="hi">api</span>-58c9d4b7f-r2mzt</span>
-<span class="cmd">curl -s -H "Host: other.local" http://localhost:8080/ | head -3</span>
+<span class="cmd">curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.local" http://localhost:8080/</span>
 <span class="bad">404</span></pre>
   <aside class="notes">
     localhost:8080 comes from port-forwarding Envoy's generated Service in envoy-gateway-system (see lesson step 4).
@@ -373,9 +413,10 @@ spec:
     </g>
     <text class="m acc" x="10" y="220">pods 3/3</text>
   </svg>
-  <p class="take">Refused Pods are never created, so they aren't Pending. Nothing in default is touched.</p>
+  <p class="lead">Each Pod now requests <code>cpu: 100m</code>, <code>memory: 64Mi</code>. The quota counts them.</p>
+  <p class="take">The API server refuses Pods 4 and 5. They're never created, so they aren't Pending. Nothing in the <code>default</code> namespace is touched.</p>
   <aside class="notes">
-    Requests added: cpu 100m, memory 64Mi. kubectl describe quota -n testing shows pods 3/3.
+    kubectl describe quota -n testing shows pods 3/3.
     The Deployment still wants 5; the ReplicaSet keeps trying; the API server keeps refusing.
   </aside>
 </section>
@@ -391,7 +432,7 @@ spec:
     </g>
     <text class="b fragment" x="20" y="260" style="font-size:36px">Same namespace? Just <tspan style="font-family:'JetBrains Mono',monospace;fill:var(--accent)">front</tspan></text>
   </svg>
-  <p class="take">Namespaces don't block traffic between teams. That needs a NetworkPolicy.</p>
+  <p class="take">Namespaces keep names apart, not traffic. Any Pod can still call <code>front.testing</code>.</p>
   <aside class="notes">
     kubectl get pods -A -l app=front looks in all namespaces.
     Test: kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- wget -qO- http://front.testing.svc.cluster.local
@@ -401,12 +442,13 @@ spec:
 
 <section>
   <h2>kubeconfig and contexts</h2>
+  <p class="lead">You have a laptop cluster and a work cluster. How does <code>kubectl</code> know which one to talk to?</p>
   <svg class="d" viewBox="0 0 1170 330" role="img" aria-label="A context in ~/.kube/config combines a cluster, a user and a default namespace; kubectl uses the current context">
     <rect class="frame" x="10" y="10" width="1150" height="300" rx="14"/>
     <text class="m" x="35" y="50">~/.kube/config</text>
     <rect class="box" x="35" y="80" width="250" height="90" rx="10"/><text class="b" x="60" y="135">cluster</text>
     <text class="b big" x="300" y="135">+</text>
-    <rect class="box" x="330" y="80" width="250" height="90" rx="10"/><text class="b" x="355" y="135">user</text>
+    <rect class="box" x="330" y="80" width="250" height="90" rx="10"/><text class="b" x="355" y="125">user</text><text class="s" x="355" y="155">your login</text>
     <text class="b big" x="595" y="135">+</text>
     <rect class="box" x="625" y="80" width="250" height="90" rx="10"/><text class="b" x="650" y="135">namespace</text>
     <text class="b big" x="890" y="135">=</text>
@@ -414,7 +456,7 @@ spec:
     <g class="fragment">
       <text class="m" x="35" y="232" style="font-size:26px">* docker-desktop</text>
       <text class="s" x="35" y="272" style="font-size:24px">current</text>
-      <text class="m" x="520" y="232" style="font-size:26px">shop-prod</text>
+      <text class="m" x="520" y="232" style="font-size:26px">arn:aws:eks:…:cluster/shop-prod</text>
       <text class="s" x="520" y="272" style="font-size:24px">added by aws eks update-kubeconfig</text>
     </g>
   </svg>
@@ -429,8 +471,8 @@ spec:
   <table>
     <tr><th>Option</th><th>Good for</th></tr>
     <tr><td>kind / minikube / Docker Desktop</td><td>Your laptop: quick, throwaway practice</td></tr>
-    <tr class="fragment"><td>kubeadm on VMs</td><td>A college lab: you build and run every part</td></tr>
-    <tr class="fragment"><td>Managed: EKS, AKS, GKE</td><td>Production: the cloud runs the control plane</td></tr>
+    <tr class="fragment"><td>kubeadm on VMs</td><td>A college lab: you install and join every node yourself</td></tr>
+    <tr class="fragment"><td>Managed: Amazon EKS, Azure AKS, Google GKE</td><td>Production: the cloud runs the control plane</td></tr>
   </table>
   <aside class="notes">
     kubeadm: you install and join each node, and you run upgrades, certificates and etcd backups yourself.
@@ -449,7 +491,7 @@ spec:
   <h2>It never starts</h2>
   <table>
     <tr><th>You see</th><th>It means</th><th>Check with</th></tr>
-    <tr><td><code>Pending</code></td><td>Not on a node yet, or still being set up</td><td><code>describe pod</code></td></tr>
+    <tr><td><code>Pending</code></td><td>No node can take it yet</td><td><code>describe pod</code></td></tr>
     <tr class="fragment"><td><code>ImagePullBackOff</code></td><td>Node can't download the image</td><td><code>describe pod</code></td></tr>
     <tr class="fragment"><td><code>CreateContainer­ConfigError</code></td><td>Missing ConfigMap, Secret or key</td><td><code>describe pod</code></td></tr>
   </table>
@@ -464,13 +506,14 @@ spec:
   <h2>It starts, but it's broken</h2>
   <table>
     <tr><th>You see</th><th>It means</th><th>Check with</th></tr>
-    <tr><td><code>CrashLoopBackOff</code></td><td>Starts, exits, again and again</td><td><code>logs --previous</code></td></tr>
-    <tr class="fragment"><td><code>OOMKilled</code></td><td>Used more memory than its limit</td><td><code>describe pod</code></td></tr>
-    <tr class="fragment"><td>Running, Service silent</td><td>Traffic can't reach the Pod</td><td><code>get endpointslices</code></td></tr>
+    <tr><td><code>CrashLoopBackOff</code></td><td>Keeps crashing</td><td><code>logs --previous</code></td></tr>
+    <tr class="fragment"><td><code>OOMKilled</code></td><td>Out of memory</td><td><code>describe pod</code></td></tr>
+    <tr class="fragment"><td>Running, no replies</td><td>Service can't find the Pod</td><td><code>get pods --show-labels</code></td></tr>
   </table>
   <aside class="notes">
     CrashLoopBackOff causes: app error, missing env var, can't reach the database, liveness probe too strict.
-    OOMKilled shows in describe under Last State. Service silent: selector vs labels, wrong targetPort, readiness failing.
+    OOMKilled: used more memory than its limit; shows in describe under Last State.
+    No replies: compare the Service selector with the Pod labels. Also check targetPort and readiness. kubectl get endpointslices -l kubernetes.io/service-name=&lt;svc&gt; shows whether the Service found any Pods.
   </aside>
 </section>
 
@@ -489,11 +532,13 @@ spec:
   <aside class="notes">
     kubectl create deployment big --image=traefik/whoami:v1.11; kubectl set resources deployment big --requests=memory=64Gi; kubectl describe pod -l app=big.
     Fix: ask for a sensible amount, or add bigger nodes. kubectl delete deployment big.
+    minikube doesn't taint its control-plane node, so there the message is "3 Insufficient memory".
   </aside>
 </section>
 
 <section>
   <h2>The 127.0.0.1 trap</h2>
+  <p class="lead">The API is in <code>CrashLoopBackOff</code>. Its log: <code class="bad">connect ECONNREFUSED 127.0.0.1:5432</code></p>
   <svg class="d" viewBox="0 0 1170 360" role="img" aria-label="Inside the API Pod, 127.0.0.1 is the Pod itself, so a connection to 127.0.0.1:5432 is refused; the database runs in another Pod reached through the Service name db">
     <rect class="pod" x="20" y="80" width="400" height="200" rx="14"/>
     <text class="b" x="45" y="125">API Pod</text>
@@ -511,7 +556,7 @@ spec:
   </svg>
   <p class="take">It worked on the laptop because both ran on one machine. In the cluster, use the Service name.</p>
   <aside class="notes">
-    Log line: connect ECONNREFUSED 127.0.0.1:5432. Set the database host through a ConfigMap: db, or db.shop.svc.cluster.local.
+    Set the database host through a ConfigMap: db, or db.shop.svc.cluster.local.
   </aside>
 </section>
 
@@ -525,7 +570,7 @@ spec:
 <section>
   <div class="kicker">Check 1</div>
   <p class="q">You apply a Gateway and an HTTPRoute in a fresh cluster. The Gateway never becomes Programmed. Most likely cause?</p>
-  <div class="a fragment">No Gateway controller is installed, or none matches the GatewayClass. The objects are only configuration.</div>
+  <div class="a fragment">No Gateway controller is installed, or none matches the GatewayClass. The objects are only configuration. Second most likely: no load balancer, so the Gateway gets no address.</div>
 </section>
 
 <section>
@@ -552,7 +597,7 @@ spec:
 <span class="out">orders-api-…   0/1   <span class="bad">CrashLoopBackOff</span></span>
 <span class="out">redis-…        0/1   <span class="bad">Pending</span></span></pre>
   <p class="q">Which Pod do you fix first, and why?</p>
-  <div class="a fragment">Check first: <code>describe pod</code> on redis (Events) and <code>logs --previous</code> on the API. If the API log says it can't reach Redis, fix <b>redis</b> first, and the API may recover by itself.</div>
+  <div class="a fragment"><b>redis</b>, if the API's <code>logs --previous</code> says it can't reach Redis: the API crash is a symptom and may clear by itself. Read redis's Events with <code>describe pod</code>. The frontend image error is unrelated; fix it separately.</div>
 </section>
 
 <section class="title">

@@ -170,7 +170,7 @@ spec:
             summary: "shop-api: {{ $value | humanizePercentage }} of requests are failing"</code></pre>
 Three parts: <em>what is measured</em> (the share of requests failing over 5 minutes), <em>the threshold</em> (more than 5%), and <em>the duration</em> (<code>for: 2m</code>: it must stay above 5% for 2 minutes, so one bad moment doesn't wake anyone).
 <pre><code>kubectl apply -f alerts.yaml</code></pre></li>
-<li>In Prometheus, open Alerts. <b>Predict first:</b> with about 9% errors, what state is <code>ShopApiHighErrorRate</code> in after 1 minute, and after 3? First <code>Pending</code> (condition true, waiting out the 2 minutes), then <code>Firing</code>. You'll also see <code>Watchdog</code> always firing, which is on purpose: it proves the alert pipeline works. On a laptop cluster a few built-in alerts like <code>NodeClockNotSynchronising</code> may show as pending; ignore them today.</li>
+<li>In Prometheus, open Alerts. <b>Predict first:</b> with about 9% errors, what state is <code>ShopApiHighErrorRate</code> in after 1 minute, and after 3? First <code>Pending</code> (condition true, waiting out the 2 minutes), then <code>Firing</code>. You'll also see <code>Watchdog</code> always firing, which is on purpose: it proves the alert pipeline works. On a laptop cluster a few built-in alerts like <code>NodeClockNotSynchronising</code> may show as pending; ignore them.</li>
 <li>See it arrive in Alertmanager:
 <pre><code>kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-alertmanager 9093:9093</code></pre>
 Open <a href="http://localhost:9093">localhost:9093</a>. The alert is there, with its labels. In a real setup, Alertmanager's config would send it to Slack:
