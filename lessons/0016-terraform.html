@@ -3,6 +3,13 @@
 <div class="kicker"><a href="../index.html">Course home</a> · Module 3 · Lesson 16</div>
 <h1>Infrastructure as code with Terraform</h1>
 
+<div class="box"><b>One-hour class path.</b> Start with the 10-minute scenario below. Then do the 30-minute core demo (steps 1–7), spend 15 minutes on the “spot the problems” drill, and finish with exit question 5. Steps 8–10, the AWS example and the other practice questions are reference or homework.</div>
+
+<div class="practice-q recall">
+<p class="meta">Opening scenario · 10 minutes</p>
+<p>A college creates its AWS network, EKS cluster, worker nodes, registry and Cloudflare DNS records by clicking in two consoles. Test no longer matches production, and nobody can tell who changed what. Choose a tool that puts the setup in Git, previews a change before making it, and can create or remove another copy on demand. Explain how it would work; exact syntax is not required.</p>
+</div>
+
 <h2>Why this matters for DevOps</h2>
 <p>So far someone had to create the cluster before you could use it. In a company that means a network (VPC), a Kubernetes cluster, worker nodes, a registry, DNS records, all in the cloud. Clicking these together in the AWS console works once. Then a new teammate asks “how was prod set up?” and nobody remembers. Dev and prod slowly become different. Someone changes a setting at 2 a.m. and it's never written down. Infrastructure as code (IaC) fixes this the same way Git fixed source code: the setup lives in files, changes go through a pull request, and anyone can rebuild it from scratch.</p>
 
@@ -13,11 +20,12 @@
 <p class="aside">Think of a building plan approved by the municipal office. The drawing (code) says what the house should look like. The site register (state) records what has actually been built and where. Before any work, the engineer compares drawing with site and lists the changes (plan). Only one contractor holds the register at a time (lock). If someone adds a room without approval, the next inspection finds it (drift).</p>
 
 <table>
-<tr><th>Choice</th><th>Good at</th><th>Weak at</th></tr>
-<tr><td>Console clicks</td><td>Learning, one-off experiments</td><td>No history, no review, can't repeat it for prod</td></tr>
-<tr><td>Shell script of <code>aws</code> CLI commands</td><td>Simple one-time tasks</td><td>Running it twice creates duplicates or fails; no preview; doesn't know what already exists</td></tr>
-<tr><td>CloudFormation / CDK</td><td>AWS-only shops; AWS manages the state for you</td><td>AWS only: can't also manage Cloudflare DNS or GitHub</td></tr>
-<tr><td>Terraform / OpenTofu</td><td>Any cloud or service through providers; <code>plan</code> preview; one workflow everywhere</td><td>You must look after the state file</td></tr>
+<caption>Ways to create infrastructure</caption>
+<tr><th scope="col">Choice</th><th scope="col">Good at</th><th scope="col">Weak at</th></tr>
+<tr><th scope="row">Console clicks</th><td>Learning, one-off experiments</td><td>No history, no review, can't repeat it for prod</td></tr>
+<tr><th scope="row">Shell script of <code>aws</code> CLI commands</th><td>Simple one-time tasks</td><td>Running it twice creates duplicates or fails; no preview; doesn't know what already exists</td></tr>
+<tr><th scope="row">CloudFormation / CDK</th><td>AWS-only shops; AWS manages the state for you</td><td>AWS only: can't also manage Cloudflare DNS or GitHub</td></tr>
+<tr><th scope="row">Terraform / OpenTofu</th><td>Any cloud or service through providers; <code>plan</code> preview; one workflow everywhere</td><td>You must look after the state file</td></tr>
 </table>
 <p>OpenTofu is an open-source fork of Terraform with the same language and commands (<code>tofu plan</code>). Everything here works with either.</p>
 
@@ -28,7 +36,7 @@
 echo $DOCKER_HOST</code></pre>
 <p>Without this, <code>apply</code> fails with <code>Cannot connect to the Docker daemon at unix:///var/run/docker.sock</code>. Windows users can skip this step.</p>
 
-<h2>Do it: plan, apply, destroy</h2>
+<h2>Core demo (30 minutes): plan, apply and find drift</h2>
 <ol class="steps">
 <li>Create <code>main.tf</code>:
 <pre><code>terraform {
@@ -91,7 +99,7 @@ terraform output -raw url</code></pre>
 Look for <code>external = 8081 -&gt; 8082 # forces replacement</code> and <code>Plan: 1 to add, 0 to change, 1 to destroy</code>. Docker can't change a running container's port, so Terraform must delete it and make a new one. The plan warns you <em>before</em> anything happens. On AWS, the same <code>forces replacement</code> on a database means you lose its data, so reviewers look for that line. Set the port back to <code>8081</code>.</li>
 </ol>
 
-<h2>Do it: drift, state and environments</h2>
+<h2>Core demo continued: find drift</h2>
 <ol class="steps" start="7">
 <li>Someone “just fixes something quickly” by hand, outside Terraform:
 <pre><code>docker update --restart=always web-dev
@@ -100,6 +108,11 @@ Terraform reads the real container, compares it with the code, and shows <code>~
 <pre><code>docker rm -f web-dev
 terraform plan</code></pre>
 <code>docker_container.web will be created</code>. Terraform noticed it's gone and will recreate it. Run <code>terraform apply</code>. The same happens on AWS when someone turns off versioning on an S3 bucket in the console: the next plan shows it, and apply turns it back on. Many teams run <code>terraform plan</code> on a schedule in CI just to catch drift.</li>
+</ol>
+<p class="aside"><b>Core-path cleanup:</b> if class stops here, run <code>terraform destroy</code>. Continue below only for the optional state and environment extension.</p>
+
+<h2>Optional extension: inspect state and create a second environment</h2>
+<ol class="steps" start="8">
 <li>Look inside the state:
 <pre><code>terraform state show docker_container.web | head -15
 grep -c '"type"' terraform.tfstate</code></pre>
@@ -113,31 +126,32 @@ It holds every setting of every resource, in plain text. On AWS that includes da
     use_lockfile = true
   }
 }</code></pre>
-The bucket is encrypted and only the team and the CI pipeline can read it. <code>use_lockfile</code> makes Terraform write a lock object next to the state during <code>plan</code> and <code>apply</code>. If Priya is applying and Arjun runs apply too, Arjun gets <code>Error acquiring the state lock</code> and waits, instead of both writing the state at once and corrupting it. (Older setups use a DynamoDB table for the lock; you'll see both.) You won't run this: it needs an AWS account.</li>
-<li>Same code, second environment. A <em>workspace</em> gives the same code a separate state:
+The bucket is encrypted and only the team and the CI pipeline can read it. <code>use_lockfile</code> makes Terraform write a lock object next to the state during <code>plan</code> and <code>apply</code>. If Priya is applying and Arjun runs apply too, Arjun gets <code>Error acquiring the state lock</code> instead of corrupting the state. By default Terraform returns the error immediately; a command configured with, for example, <code>-lock-timeout=5m</code> retries for up to five minutes. (Older setups use a DynamoDB table for the lock; you'll see both.) You won't run this: it needs an AWS account.</li>
+<li>Same code, second local demo environment. A Terraform CLI <em>workspace</em> gives the same code a separate state:
 <pre><code>terraform workspace new prod
 terraform apply -var env=prod -var port=8090
 docker ps --format '{{.Names}} {{.Ports}}'
 terraform workspace list</code></pre>
-Two containers, <code>web-dev</code> on 8081 and <code>web-prod</code> on 8090, from one <code>main.tf</code>. Each has its own state (look in <code>terraform.tfstate.d/prod/</code>). In real projects the values usually live in small files, <code>dev.tfvars</code> and <code>prod.tfvars</code>, used with <code>-var-file=prod.tfvars</code>, and prod gets bigger nodes and more of them. Same code, so dev really does match prod except for those values.</li>
+Two containers, <code>web-dev</code> on 8081 and <code>web-prod</code> on 8090, from one <code>main.tf</code>. Each has its own state (look in <code>terraform.tfstate.d/prod/</code>). CLI workspaces are convenient for this laptop demo, but they share one backend and are not strong isolation for real dev and prod. When environments need different credentials or access controls, use separate root configurations and backends that call shared modules; keep values such as node size in each environment's variable file.</li>
 <li>Clean up both environments:
 <pre><code>terraform destroy -var env=prod -var port=8090
 terraform workspace select default
 terraform destroy
 docker ps -a | grep web</code></pre>
-Nothing left. On AWS, <code>destroy</code> at the end of a practice session is what keeps your bill at zero.</li>
+Nothing left. On AWS, <code>destroy</code> stops charges only for resources Terraform successfully removes. Read the destroy plan, check for failed or retained resources, and verify the AWS billing console afterward.</li>
 </ol>
 
-<h2>What the AWS version looks like</h2>
+<h2>Optional reference: what the AWS version looks like</h2>
 <p>You won't run this, but read it: it's the same shape. A provider, variables, and resources that refer to each other. (Real EKS code usually uses the community <code>terraform-aws-modules/eks</code> module rather than writing every resource.)</p>
 <pre><code>provider "aws" { region = "ap-south-1" }
 
 variable "node_count"    { type = number }
 variable "instance_type" { type = string }
+variable "environment"   { type = string }
 
 module "eks" {
   source          = "terraform-aws-modules/eks/aws"
-  cluster_name    = "shop-${terraform.workspace}"
+  cluster_name    = "shop-${var.environment}"
   # ... VPC and subnets ...
   eks_managed_node_groups = {
     default = {
@@ -152,7 +166,7 @@ resource "aws_ecr_repository" "api" { name = "shop/api" }
 output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></pre>
 <p>A pull request changes <code>node_count</code> in <code>prod.tfvars</code> from 3 to 5. CI runs <code>terraform plan</code> and posts the result on the pull request: <code>1 to change</code>. A teammate reviews it, merges, and the pipeline runs <code>apply</code> against the remote state. No one clicks in the console.</p>
 
-<div class="trap"><b>Drill: spot the problems.</b> A team describes how they use Terraform for their AWS setup. Find four practices that will cause trouble, and say what to do instead.
+<div class="trap"><b>In-class drill · 15 minutes: spot the problems.</b> A team describes how they use Terraform for their AWS setup. Find four practices that will cause trouble, and say what to do instead.
 <pre><code>1. terraform.tfstate is committed to the Git repo so everyone has a copy.
 2. Each engineer runs terraform apply from their own laptop whenever they need to.
 3. The database password is written in main.tf: password = "Shop@123".
@@ -162,7 +176,7 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <p>1. <b>State in Git</b>: it holds secrets in plain text, and two people's copies get out of sync, so plans are wrong. Use a remote backend (S3, encrypted) and add <code>*.tfstate</code> to <code>.gitignore</code>. 2. <b>No locking, no review</b>: two applies at once can corrupt the state, and changes skip review. Turn on state locking, and run <code>plan</code> and <code>apply</code> from CI after a pull request is approved. 3. <b>Password in code</b>: it's in Git history forever. Pass it as a sensitive variable from a secrets store (AWS Secrets Manager, or a CI secret), or let AWS generate and manage it. 4. <b>Console changes</b>: this is drift. The next <code>apply</code> undoes the urgent fix, or the code never gets updated. Make the change in code, even when urgent; scheduled <code>plan</code> runs catch anything that slips through.</p></details>
 </div>
 
-<h2>Practice questions</h2>
+<h2>Homework and extra practice</h2>
 
 <div class="practice-q recall">
 <p class="meta">5 marks · 9 minutes</p>
@@ -179,13 +193,13 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <li><span class="am">[1]</span>Explain how the tool keeps track of the resources it has created here.</li>
 <li><span class="am">[1]</span>Use this to show how the team previews changes and removes the whole environment.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Terraform practice question 1" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Terraform (or OpenTofu). Declarative files kept in Git; <code>plan</code> previews every change; <code>apply</code> and <code>destroy</code> create and remove everything; and through providers one tool manages both AWS (the <code>aws</code> provider) and Cloudflare (the <code>cloudflare</code> provider). CloudFormation or CDK can't manage the Cloudflare records; console clicks and CLI scripts give no preview and no record.</li>
 <li><b>From Git to AWS:</b> the VPC, cluster, node group, registry and DNS records are declared in <code>.tf</code> files. A change is made in a branch and opened as a pull request; CI runs <code>terraform plan</code> and posts the output; a reviewer approves; after merge, the pipeline runs <code>terraform apply</code>, which calls the AWS and Cloudflare APIs to make the real resources match.</li>
 <li><b>Keeping track:</b> the state file maps each resource in the code to the real resource's ID. It's kept in a remote backend (an encrypted S3 bucket, with locking), not on a laptop or in Git.</li>
-<li><b>Preview and remove:</b> <code>plan</code> reads the current settings of the resources in the state, compares them with the code, and lists what will be created, changed, replaced or destroyed, before anything happens. An identical copy is the same code applied with a separate state (a workspace or another state key) and its own variables. <code>destroy</code> deletes everything recorded in that state, so nothing is left behind or forgotten.</li>
+<li><b>Preview and remove:</b> <code>plan</code> reads the current settings of the resources in the state, compares them with the code, and lists what will be created, changed, replaced or destroyed, before anything happens. An identical copy uses the same modules from a separate root configuration and backend, with its own variables. <code>destroy</code> proposes deleting everything recorded in that state; the team reviews the plan and verifies that no retained or unmanaged resources remain.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> tool choice with justification covering Git, preview, repeatability and both providers 1; environment described as files with providers 1; Git-to-AWS workflow with plan and apply 1; role of the state file 1; how state enables preview and destroy 1. Exact syntax isn't required.</p>
 </details></div>
@@ -204,13 +218,13 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <li><span class="am">[2]</span>Show where the record of what exists should be kept, and why.</li>
 <li><span class="am">[1]</span>Apply it: show how this stops the engineers' changes from overwriting each other.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Terraform practice question 2" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Terraform (or OpenTofu): code reviewed in Git, <code>plan</code> as a preview, and a remote state with locking. (CloudFormation, with change sets and stack-level locking, can be justified too.)</li>
-<li><b>One set of files, two environments:</b> the VPC, cluster and node group are written once, with input variables such as <code>instance_type</code> and <code>node_count</code>. Each environment has a small values file, <code>staging.tfvars</code> (for example 2 × <code>t3.medium</code>) and <code>prod.tfvars</code> (5 × <code>m5.large</code>), and its own state (a workspace or a separate state key). The environments differ only where the values differ.</li>
+<li><b>One set of modules, two environments:</b> the VPC, cluster and node group are written once as shared modules, with input variables such as <code>instance_type</code> and <code>node_count</code>. Staging and prod each have a small root configuration, variable file and backend: <code>staging.tfvars</code> might request 2 × <code>t3.medium</code>, while <code>prod.tfvars</code> requests 5 × <code>m5.large</code>. They reuse the same modules but can have separate credentials and access controls.</li>
 <li><b>Where the record lives:</b> the state file maps every resource to what really exists. It goes in a remote backend, an S3 bucket with encryption and versioning and restricted access, with one state per environment. Not on a laptop, where others can't see it and it gets out of date, and not in Git, because it holds secrets in plain text and two copies drift apart.</li>
-<li><b>No overwriting:</b> state locking (<code>use_lockfile</code> in S3, or a DynamoDB table). While one engineer's <code>plan</code> or <code>apply</code> runs, the state is locked; a second engineer gets “Error acquiring the state lock” and waits. Because every plan starts from the latest shared state, nobody applies over someone else's change from an old copy. Running apply only from CI after review makes this stronger.</li>
+<li><b>No overwriting:</b> state locking (<code>use_lockfile</code> in S3, or a DynamoDB table). While one engineer's <code>plan</code> or <code>apply</code> runs, the state is locked; a second engineer gets “Error acquiring the state lock” immediately, or retries when a <code>-lock-timeout</code> is configured. Because every plan starts from the latest shared state, nobody applies over someone else's change from an old copy. Running apply only from CI after review makes this stronger.</li>
 </ul>
 <p class="marking"><b>Marking (5):</b> tool choice and justification 1; one set of files with variables per environment 1; remote state, where and why 2; locking prevents overwrites 1. Exact syntax isn't required.</p>
 </details></div>
@@ -229,7 +243,7 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <li><span class="am">[1]</span>Show how it puts the bucket back.</li>
 <li><span class="am">[1]</span>Show how the bucket name is handed to the CI pipeline.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Terraform practice question 3" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Terraform (or OpenTofu): <code>plan</code> compares the real account with the code and shows any difference, <code>apply</code> puts it back, and output values pass results to other tools. (CloudFormation's drift detection finds the change, but a stack update won't undo a console change to a resource whose template hasn't changed, so it needs extra steps.)</li>
@@ -250,7 +264,7 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <button>It updates the state file to match the code</button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="2" data-explain="The lock means only one apply can write the state at a time. The second engineer gets 'Error acquiring the state lock' and waits.">
+<div class="quiz" data-answer="2" data-explain="The lock means only one apply can write the state at a time. The second engineer gets 'Error acquiring the state lock'; Terraform retries only when a lock timeout is configured.">
 <p class="q">2. Two engineers run <code>terraform apply</code> on prod at the same moment. The state is in S3 with locking on. What happens?</p>
 <button>Both applies run, and the second one's changes win</button>
 <button>Terraform merges both sets of changes</button>
@@ -272,10 +286,10 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }</code></
 <div class="fb"></div></div>
 
 <div class="quiz recall">
-<p class="q">5. Exit question: “Your team creates dev and prod EKS clusters by clicking in the AWS console. Convince them to use Terraform. Explain how it would work from Git to AWS, and how two engineers avoid overwriting each other.”</p>
-<textarea placeholder="Your answer, from memory…"></textarea>
+<p class="q">5. Exit question · 5 minutes: “Your team creates dev and prod EKS clusters by clicking in the AWS console. Convince them to use Terraform. Explain how it would work from Git to AWS, and how two engineers avoid overwriting each other.”</p>
+<textarea aria-label="Answer to Terraform exit question" placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
-<p>With console clicks, nobody can see how prod was built, dev and prod drift apart, and rebuilding after a mistake means remembering every click. With Terraform the VPC, cluster, node group and registry are declared in <code>.tf</code> files in Git, using the AWS provider. Dev and prod use the same code with different variable files, for example 2 small nodes in dev and 5 larger ones in prod, so they differ only where we choose. A change starts in a branch; CI runs <code>terraform plan</code> and posts it on the pull request, so reviewers see exactly what will be created, changed or replaced before anything happens. After approval, the pipeline runs <code>apply</code>. Terraform records what exists in a state file, which we keep in an encrypted S3 bucket, not in Git, because it contains secrets. State locking means only one apply runs at a time: if two engineers try at once, the second gets a lock error and waits, so the state can't be corrupted. Running <code>plan</code> on a schedule also catches drift from anyone who changes things in the console, and <code>apply</code> puts it back.</p></details>
+<p>With console clicks, nobody can see how prod was built, dev and prod drift apart, and rebuilding after a mistake means remembering every click. With Terraform the VPC, cluster, node group and registry are declared in <code>.tf</code> files in Git, using the AWS provider. Dev and prod call the same shared modules from separate root configurations and backends, with different variable files—for example 2 small nodes in dev and 5 larger ones in prod—so they differ only where we choose and can have separate credentials. A change starts in a branch; CI runs <code>terraform plan</code> and posts it on the pull request, so reviewers see exactly what will be created, changed or replaced before anything happens. After approval, the pipeline runs <code>apply</code>. Terraform records what exists in a state file, which we keep in an encrypted S3 bucket, not in Git, because it contains secrets. State locking means only one apply runs at a time: if two engineers try at once, the second gets a lock error, or retries when a lock timeout is configured, so the state can't be corrupted. Running <code>plan</code> on a schedule also catches drift from anyone who changes things in the console, and <code>apply</code> puts it back.</p></details>
 </div>
 
 <h2>Read next</h2>

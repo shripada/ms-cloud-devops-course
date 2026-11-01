@@ -39,7 +39,7 @@
     <div class="card bad fragment">
       <h3>Two addresses</h3>
       <p>Each LoadBalancer Service gets its own IP address.</p>
-      <p class="muted" style="margin:0">Customers should type just one: <code>shop.local</code></p>
+      <p class="muted" style="margin:0">Customers should type just one: <code>shop.example.com</code></p>
     </div>
     <div class="card bad fragment">
       <h3>A shared cluster</h3>
@@ -203,7 +203,7 @@ spec:
   parentRefs:
     - name: shop
   hostnames:
-    - shop.local
+    - shop.example.com
 </code></pre>
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0">
@@ -216,7 +216,7 @@ spec:
       </div>
       <div class="step fragment" data-fragment-index="1">
         <h3>Only for</h3>
-        <p>Requests with <code>Host: shop.local</code>.</p>
+        <p>Requests with <code>Host: shop.example.com</code>.</p>
       </div>
     </div>
   </div>
@@ -283,7 +283,7 @@ rules:
 
 <section>
   <h2>Follow three requests</h2>
-  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Request for shop.local slash goes through Envoy to the web Service; shop.local slash api slash orders goes to the api Service; other.local gets 404">
+  <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="Request for shop.example.com slash goes through Envoy to the web Service; shop.example.com slash api slash orders goes to the api Service; other.example.com gets 404">
     <rect class="pod" x="450" y="150" width="260" height="120" rx="14"/>
     <text class="b" x="475" y="200">Envoy</text>
     <text class="s" x="475" y="235">the one entry point</text>
@@ -292,18 +292,18 @@ rules:
     <rect class="svc" x="900" y="290" width="250" height="90" rx="12"/>
     <text class="m" x="925" y="345">api</text>
     <g class="fragment">
-      <text class="m" x="10" y="70">shop.local /</text>
-      <path class="arrow" d="M200,80 L446,170"/>
+      <text class="m" x="10" y="70">shop.example.com</text><text class="m" x="10" y="105">/</text>
+      <path class="arrow" d="M280,80 L446,170"/>
       <path class="arrow acc" d="M712,180 L896,90"/>
     </g>
     <g class="fragment">
-      <text class="m" x="10" y="220">shop.local /api/orders</text>
-      <path class="arrow" d="M330,230 L446,215"/>
+      <text class="m" x="10" y="200">shop.example.com</text><text class="m" x="10" y="235">/api/orders</text>
+      <path class="arrow" d="M280,212 L446,212"/>
       <path class="arrow acc" d="M712,240 L896,330"/>
     </g>
     <g class="fragment">
-      <text class="m" x="10" y="370">other.local /</text>
-      <path class="arrow" d="M200,360 L446,260"/>
+      <text class="m" x="10" y="350">other.example.com</text><text class="m" x="10" y="385">/</text>
+      <path class="arrow" d="M290,350 L446,260"/>
       <text class="b badt" x="460" y="320">404: no route</text>
     </g>
   </svg>
@@ -314,11 +314,11 @@ rules:
   <h2>Send requests with a Host header</h2>
 <pre class="term"><span class="cm"># second terminal: port-forward Envoy's Service to localhost:8080 (lesson step)</span>
 <span class="cm"># -H sets the Host header</span>
-<span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname</span>
+<span class="cmd">curl -s -H "Host: shop.example.com" http://localhost:8080/ | grep Hostname</span>
 <span class="out">Hostname: <span class="hi">web</span>-6b7f9c4d8-x2k4q</span>
-<span class="cmd">curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname</span>
+<span class="cmd">curl -s -H "Host: shop.example.com" http://localhost:8080/api/orders | grep Hostname</span>
 <span class="out">Hostname: <span class="hi">api</span>-58c9d4b7f-r2mzt</span>
-<span class="cmd">curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.local" http://localhost:8080/</span>
+<span class="cmd">curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.example.com" http://localhost:8080/</span>
 <span class="bad">404</span></pre>
   <aside class="notes">
     localhost:8080 comes from port-forwarding Envoy's generated Service in envoy-gateway-system (see lesson step 4).

@@ -7,7 +7,7 @@
 <p>A real shop has a frontend, an API and more, all behind one website address. Giving each Service its own cloud load balancer creates another billable resource and another address, certificate and firewall policy to manage. And a real cluster isn't yours alone: dev, testing and sometimes other teams share it, so one team's mistake must not starve the others. Finally, every week something is <code>Pending</code> or <code>CrashLoopBackOff</code>, and the person who can find out why in two minutes is the one the team calls.</p>
 
 <h2>Three ideas, no more</h2>
-<p><b>Gateway API and its implementation</b>: Gateway API is the modern Kubernetes API for traffic entering and moving through a cluster. A <code>GatewayClass</code> chooses an implementation, a <code>Gateway</code> declares listeners such as HTTP on port 80, and an <code>HTTPRoute</code> says “requests for <code>shop.local</code> whose path is <code>/api</code> or under it (<code>/api/orders</code>, but not <code>/apiary</code>) go to the <code>api</code> Service”. These objects are configuration; they do not proxy traffic by themselves. In this lesson, the Envoy Gateway controller watches them and configures Envoy Proxy Pods, which handle the live requests. Kubernetes recommends Gateway API for new work; the older Ingress API is frozen but not scheduled for removal. <a href="https://gateway-api.sigs.k8s.io/guides/getting-started/">[Gateway API: Getting started]</a> <a href="https://gateway.envoyproxy.io/docs/concepts/">[Envoy Gateway architecture]</a></p>
+<p><b>Gateway API and its implementation</b>: Gateway API is the modern Kubernetes API for traffic entering and moving through a cluster. A <code>GatewayClass</code> chooses an implementation, a <code>Gateway</code> declares listeners such as HTTP on port 80, and an <code>HTTPRoute</code> says “requests for <code>shop.example.com</code> whose path is <code>/api</code> or under it (<code>/api/orders</code>, but not <code>/apiary</code>) go to the <code>api</code> Service”. These objects are configuration; they do not proxy traffic by themselves. In this lesson, the Envoy Gateway controller watches them and configures Envoy Proxy Pods, which handle the live requests. Kubernetes recommends Gateway API for new work; the older Ingress API is frozen but not scheduled for removal. <a href="https://gateway-api.sigs.k8s.io/guides/getting-started/">[Gateway API: Getting started]</a> <a href="https://gateway.envoyproxy.io/docs/concepts/">[Envoy Gateway architecture]</a></p>
 <p><b>Namespaces, labels and ResourceQuotas</b>: a <em>namespace</em> is a folder for objects: names only have to be unique inside it, and you give each team its own. <em>Labels</em> are tags on objects (<code>app=front</code>, <code>team=testing</code>) that you filter on with <code>-l</code>. A <em>ResourceQuota</em> caps what one namespace may use in total: CPU, memory, number of Pods. The API server refuses any new Pod that would go over. <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/">[Kubernetes docs: Resource Quotas]</a></p>
 <p><b>kubeconfig and contexts</b>: <code>~/.kube/config</code> lists clusters, users (credentials) and <em>contexts</em>. A context is a saved combination of cluster, user and default namespace. kubectl talks to whichever context is current. One engineer with a laptop cluster and an EKS cluster has two contexts and switches between them. <a href="https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/">[Kubernetes docs: kubeconfig]</a></p>
 <p class="aside">A big apartment building has one main gate. The gate itself is the Gateway, the security company named in its contract is the GatewayClass, and the visitor register contains the HTTPRoute rules: “visitors for flat 4B, go to Tower A”. Envoy Proxy is the guard who handles each visitor. Each tower is a namespace, and “each tower gets at most 3 parking spots” is a ResourceQuota.</p>
@@ -93,7 +93,7 @@ metadata: { name: shop }
 spec:
   parentRefs:
     - name: shop
-  hostnames: [shop.local]
+  hostnames: [shop.example.com]
   rules:
     - matches:
         - path: { type: PathPrefix, value: /api }
@@ -117,8 +117,8 @@ The <code>Gateway</code> should become <code>Accepted</code>; the <code>HTTPRout
   -l gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=shop</code></pre>
 On minikube, run <code>minikube tunnel</code> in the second terminal. On a supported cloud or a local cluster with a load-balancer implementation, use the address in <code>kubectl get gateway shop</code>:
 <pre><code>GATEWAY_HOST=$(kubectl get gateway shop -o jsonpath='{.status.addresses[0].value}')
-curl -s -H "Host: shop.local" http://$GATEWAY_HOST/ | grep Hostname
-curl -s -H "Host: shop.local" http://$GATEWAY_HOST/api/orders | grep Hostname</code></pre>
+curl -s -H "Host: shop.example.com" http://$GATEWAY_HOST/ | grep Hostname
+curl -s -H "Host: shop.example.com" http://$GATEWAY_HOST/api/orders | grep Hostname</code></pre>
 If the address remains empty or <code>&lt;pending&gt;</code>, the cluster has no LoadBalancer implementation; that is an infrastructure condition, not an HTTPRoute error.<br>
 For a local fallback, find the generated Service and port-forward it:
 <pre><code>ENVOY_SERVICE=$(kubectl get service -n envoy-gateway-system \
@@ -126,9 +126,9 @@ For a local fallback, find the generated Service and port-forward it:
   -o jsonpath='{.items[0].metadata.name}')
 kubectl port-forward -n envoy-gateway-system service/$ENVOY_SERVICE 8080:80</code></pre>
 This fallback enters through Envoy and exercises the Gateway and HTTPRoute, but bypasses the external load balancer. Back in the first terminal, send requests with the <code>Host</code> header:
-<pre><code>curl -s -H "Host: shop.local" http://localhost:8080/ | grep Hostname
-curl -s -H "Host: shop.local" http://localhost:8080/api/orders | grep Hostname
-curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.local" http://localhost:8080/</code></pre>
+<pre><code>curl -s -H "Host: shop.example.com" http://localhost:8080/ | grep Hostname
+curl -s -H "Host: shop.example.com" http://localhost:8080/api/orders | grep Hostname
+curl -s -o /dev/null -w "%{http_code}\n" -H "Host: other.example.com" http://localhost:8080/</code></pre>
 The first answers from a <code>web-…</code> Pod, the second from an <code>api-…</code> Pod, and the third gets 404 because no route matches that hostname. One Envoy entry point routes to both internal Services.</li>
 <li>Break the route twice. First, change the <code>/</code> match from <code>PathPrefix</code> to <code>Exact</code>, apply, and try <code>/</code> and <code>/about</code>. Only <code>/</code> works. Restore <code>PathPrefix</code>. Second, change the HTTPRoute's <code>parentRefs</code> name from <code>shop</code> to <code>missing</code> and apply. <code>kubectl describe httproute shop</code> no longer shows an accepted attachment to the working Gateway, and the route is not programmed. Restore <code>shop</code>, apply, and wait for the accepted status.</li>
 </ol>

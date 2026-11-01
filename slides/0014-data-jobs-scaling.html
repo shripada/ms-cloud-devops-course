@@ -37,9 +37,9 @@
   <p class="lead">The college canteen's ordering app runs on Kubernetes: a web API and a PostgreSQL database. Three things go wrong.</p>
   <table>
     <tr><th>Problem</th><th>Fix</th></tr>
-    <tr class="fragment"><td>Kubernetes recreates the database Pod, and every order is gone</td><td><b>01 Storage</b></td></tr>
-    <tr class="fragment"><td>The database needs a backup at 2 a.m., every night</td><td><b>02 Jobs</b></td></tr>
-    <tr class="fragment"><td>At 1 p.m. lunch, orders jump 10×; after lunch, they drop</td><td><b>03 Autoscaling</b></td></tr>
+    <tr class="fragment"><td>Kubernetes recreates the database Pod, and every order is gone</td><td><b>Storage</b></td></tr>
+    <tr class="fragment"><td>The database needs a backup at 2 a.m., every night</td><td><b>Jobs</b></td></tr>
+    <tr class="fragment"><td>At 1 p.m. lunch, orders jump 10×; after lunch, they drop</td><td><b>Autoscaling</b></td></tr>
   </table>
   <aside class="notes">
     Kubernetes deletes and recreates Pods all the time, on any node. Fine for the web API, which keeps nothing. A disaster for the database.

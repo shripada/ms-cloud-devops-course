@@ -3,6 +3,13 @@
 <div class="kicker"><a href="../index.html">Course home</a> · Module 3 · Lesson 17</div>
 <h1>Configuration management with Ansible</h1>
 
+<div class="box"><b>One-hour class path.</b> Start with the 10-minute scenario below. Use the Kubernetes and Vault exercise (steps 11–17) as the 30-minute core demo, spend 15 minutes on the “spot the problems” drill, and finish with exit question 5. The three-container exercise is an optional warm-up that the instructor can pre-stage; the other questions are homework.</div>
+
+<div class="practice-q recall">
+<p class="meta">Opening scenario · 10 minutes</p>
+<p>A team must deploy the same app to dev and prod Kubernetes environments with different replica counts and image tags. The database password must not be readable in Git, and running the deployment again must be safe. Choose a tool and explain how inventory, variables, idempotent tasks and encrypted secrets solve the problem; exact syntax is not required.</p>
+</div>
+
 <h2>Why this matters for DevOps</h2>
 <p>Terraform gave you machines and a cluster. Now something has to happen <em>on</em> them: create a user, install a package, write a config file, deploy an app with the right settings for dev or prod. Doing it by SSH-ing into each machine works for two machines. With twenty CI runners, someone forgets one, or types a different value on one, and now “it fails only on runner 7”. Configuration management means writing the desired setup once and applying it to every machine, as many times as you like, with the same result.</p>
 
@@ -13,10 +20,11 @@
 <p class="aside">Your college's lab assistant has to set up 60 lab PCs before the practical exam. Going to each PC is slow, and PC 43 always ends up different. Instead, there's a checklist (playbook) and a list of PCs by lab (inventory: Lab A, Lab B). For each item the assistant checks first: “Python installed? Yes, tick (ok). Wallpaper wrong? Fix it (changed).” Running the checklist again an hour later should give all ticks.</p>
 
 <table>
-<tr><th></th><th>Terraform</th><th>Ansible</th></tr>
-<tr><td>Main job</td><td>Create and delete infrastructure: networks, clusters, VMs, buckets</td><td>Configure what's on existing machines, and deploy apps</td></tr>
-<tr><td>How it knows what exists</td><td>A state file</td><td>No state: checks each machine every run</td></tr>
-<tr><td>Typical order</td><td>First: make the cluster and runners</td><td>Then: set up the runners, deploy to the cluster</td></tr>
+<caption>Terraform and Ansible have different main jobs</caption>
+<tr><th scope="col">Comparison</th><th scope="col">Terraform</th><th scope="col">Ansible</th></tr>
+<tr><th scope="row">Main job</th><td>Create and delete infrastructure: networks, clusters, VMs, buckets</td><td>Configure what's on existing machines, and deploy apps</td></tr>
+<tr><th scope="row">How it knows what exists</th><td>A state file</td><td>No state: checks each machine every run</td></tr>
+<tr><th scope="row">Typical order</th><td>First: make the cluster and runners</td><td>Then: set up the runners, deploy to the cluster</td></tr>
 </table>
 <p>They overlap a little (Ansible can create cloud resources, Terraform can run scripts), but this split is what most teams use.</p>
 
@@ -28,12 +36,12 @@ source ~/ansible-env/bin/activate
 uv pip install ansible kubernetes
 ansible --version</code></pre>
 <p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal. Make a folder, <code>config-demo</code>, and work in it.</p>
-<p>We need some machines to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. Everything else works exactly as it would with real servers.</p>
+<p><b>Optional warm-up; pre-stage this for a one-hour class.</b> We need some machines to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. The inventory, variables, modules and idempotence behave the same way; the exercise does not cover real-server concerns such as SSH keys and host verification, privilege escalation, service managers or OS package differences.</p>
 <pre><code>for h in runner1 runner2 stage1; do
   docker run -d --name $h python:3.13-slim sleep infinity
 done</code></pre>
 
-<h2>Do it: one playbook, three machines</h2>
+<h2>Optional warm-up: one playbook, three containers</h2>
 <ol class="steps">
 <li>Write the inventory, <code>inventory.ini</code>:
 <pre><code>[runners]
@@ -91,7 +99,7 @@ The recap shows <code>ok=4 changed=3</code> for each host. (The fourth task is �
 <code>changed=0</code> everywhere. Each module checked, found the machine already right, and did nothing. A shell script with <code>useradd deploy</code> would fail on the second run with “user already exists”.</li>
 </ol>
 
-<h2>Do it: drift, limits and a new machine</h2>
+<h2>Optional warm-up continued: drift, limits and a new container</h2>
 <ol class="steps" start="7">
 <li>Someone edits a file by hand on one runner:
 <pre><code>docker exec runner2 sh -c 'echo MAX_JOBS=99 &gt;&gt; /opt/app/settings.env'
@@ -104,7 +112,7 @@ Only <code>stage1</code> runs. The runners aren't touched, even though the playb
 <li>Clean up the stand-in machines: <code>docker rm -f runner1 runner2 runner3 stage1</code>.</li>
 </ol>
 
-<h2>Do it: deploy to Kubernetes, with a secret</h2>
+<h2>Core demo (30 minutes): deploy to Kubernetes, with a secret</h2>
 <p>Ansible doesn't need SSH for this part. The <code>kubernetes.core.k8s</code> module talks straight to the cluster's API, using your kubeconfig, the same way kubectl does. So the “target” is your own laptop (<code>ansible_connection=local</code>), and nothing is installed on the cluster. We'll pretend two namespaces are two clusters, dev and prod.</p>
 <ol class="steps" start="11">
 <li>Create <code>clusters.ini</code>:
@@ -190,7 +198,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <code>-e</code> overrides a variable for this run. Only dev changes. Clean up: <code>kubectl delete namespace shop-dev shop-prod</code>.</li>
 </ol>
 
-<div class="trap"><b>Drill: spot the problems.</b> A team sets up 15 CI runners with this “playbook”. Find three problems and say how to fix each.
+<div class="trap"><b>In-class drill · 15 minutes: spot the problems.</b> A team sets up 15 CI runners with this “playbook”. Find three problems and say how to fix each.
 <pre><code>- hosts: all
   tasks:
     - name: Install Docker
@@ -205,7 +213,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <p>1. <b><code>shell</code> instead of state-based modules</b>: the shell commands run every time and always report <code>changed</code>, so you can't spot drift, and re-running the install script on every run is slow and risky. Use a package module, for example <code>ansible.builtin.apt</code> with <code>state: present</code>. 2. <b><code>echo &gt;&gt;</code> appends</b>: every run adds another <code>concurrent=4</code> line, so the file grows. Use <code>ansible.builtin.lineinfile</code> or a <code>template</code>, which make sure the line is there exactly once. 3. <b>Password in plain text in the playbook</b>: it's in Git for everyone to read. Put it in a vault-encrypted variables file and use <code>{{ registry_password }}</code>, with <code>no_log: true</code>. Also accept: <code>hosts: all</code> with no groups, so you can't roll out to a few runners first; use inventory groups and <code>--limit</code>.</p></details>
 </div>
 
-<h2>Practice questions</h2>
+<h2>Homework and extra practice</h2>
 
 <div class="practice-q recall">
 <p class="meta">5 marks · 9 minutes</p>
@@ -221,7 +229,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <li><span class="am">[1]</span>Show how the replica counts for <code>staging</code> and <code>prod</code> are supplied.</li>
 <li><span class="am">[2]</span>Apply it: show why running it a second time causes no errors.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Ansible practice question 1" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Ansible, with the <code>kubernetes.core.k8s</code> module. It's agentless, runs from one control machine, uses idempotent modules, and takes variables per environment. (Kustomize overlays with <code>kubectl apply</code> cover part of this, but only if the answer explains re-runs and per-environment values. A shell script of <code>kubectl create</code> commands fails the re-run requirement.)</li>
@@ -241,7 +249,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <li><span class="am">[1]</span>Show how the set-up is run on only the three servers used by the Android team.</li>
 <li><span class="am">[2]</span>Explain why running it again on an already configured machine changes nothing.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Ansible practice question 2" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Ansible. It's agentless (it needs only SSH and Python on the targets), keeps machines in an inventory with groups, and uses idempotent modules. Chef and Puppet need an agent installed and running on every machine, which the scenario rules out.</li>
@@ -266,7 +274,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <li><span class="am">[2]</span>Show how the API key stays encrypted in Git but is usable during the run.</li>
 <li><span class="am">[1]</span>Show how the output tells which steps changed something and which found the cluster already correct.</li>
 </ol>
-<textarea placeholder="Write your answer…"></textarea>
+<textarea aria-label="Answer to Ansible practice question 3" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
 <li><b>Tool:</b> Ansible with the <code>kubernetes.core.k8s</code> module and Ansible Vault: agentless, runs from one control machine, per-cluster variables in the inventory, idempotent tasks, and <code>ok</code> or <code>changed</code> reported for every task. Helm or Kustomize alone don't cover connecting to each cluster or encrypting the key in Git.</li>
@@ -309,8 +317,8 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <div class="fb"></div></div>
 
 <div class="quiz recall">
-<p class="q">5. Exit question: “You must deploy the same app to three Kubernetes clusters, each with a different replica count and image tag, and a database password that must not be readable in Git. Re-running must be safe. Which tool, and how?”</p>
-<textarea placeholder="Your answer, from memory…"></textarea>
+<p class="q">5. Exit question · 5 minutes: “You must deploy the same app to three Kubernetes clusters, each with a different replica count and image tag, and a database password that must not be readable in Git. Re-running must be safe. Which tool, and how?”</p>
+<textarea aria-label="Answer to Ansible exit question" placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
 <p>Ansible, with the <code>kubernetes.core.k8s</code> module and Ansible Vault. It's agentless: it runs from one control machine, a laptop or a CI job, and talks to each cluster's API through a kubeconfig context, so nothing is installed on the clusters. The inventory lists the three clusters, each with its own variables (context, replica count, image tag); one playbook inserts those values into the Deployment manifest by templating, so all three use the same definition. The password is in a variables file encrypted with Ansible Vault (AES-256), so it can be committed; the playbook decrypts it at run time when given the vault password, which comes from the CI secret store, and creates a Kubernetes Secret with <code>no_log</code> so it isn't printed. Re-running is safe because each task declares the desired state: the module compares it with the cluster and reports <code>ok</code> if it already matches or <code>changed</code> if it fixed something, so a second run changes nothing, and a run after someone scaled a Deployment by hand puts back only that one.</p></details>
 </div>
