@@ -172,7 +172,7 @@ New Pod names join the table one by one as the Deployment rolls out the new Pods
 <div class="checkpoint"><b>Checkpoint:</b> after a refresh, the page says v2, and <code>terraform apply</code> says <b>No changes</b>.</div>
 
 <h2 id="b4"><span class="lab-time">1:15–1:35</span> Part 3: catch changes made by hand</h2>
-<p>Your teammate needs more Pods for a demo and runs one quick command instead of changing the code.</p>
+<p>Once Terraform manages the app, every change should go through the code. But nothing stops anyone from running <code>kubectl</code> by hand, and in real teams someone always does. Your teammate needs more Pods for a demo and runs one quick command instead of changing the code. Play the teammate.</p>
 <ol class="steps">
 <li>Make the change by hand:
 <pre><code>kubectl scale deployment hello-app --replicas=5
