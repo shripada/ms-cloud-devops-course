@@ -169,7 +169,6 @@ Look for <code>~ update in-place</code>, the line <code>image = "shripada/hello-
 kubectl get rs</code></pre>
 New Pod names join the table one by one as the Deployment rolls out the new Pods and removes the old ones. The page you have open is still the old one, so refresh it: the heading now ends in <b>v2</b> and the highlights are green. <code>kubectl get rs</code> shows the old ReplicaSet with 0 Pods and the new one with 3. It is the same rolling update you saw in lesson 13, started from a file.</li>
 </ol>
-<p class="aside"><b>Optional, if you still have your Lab 2 repository:</b> change the heading in <code>src/App.jsx</code>, build and push <code>&lt;user&gt;/hello-app:v2</code>, and change <code>shripada/hello-app</code> in <code>main.tf</code> to <code>&lt;user&gt;/hello-app</code>. Plan and apply again.</p>
 <div class="checkpoint"><b>Checkpoint:</b> after a refresh, the page says v2, and <code>terraform apply</code> says <b>No changes</b>.</div>
 
 <h2 id="b4"><span class="lab-time">1:15–1:35</span> Part 3: catch changes made by hand</h2>
