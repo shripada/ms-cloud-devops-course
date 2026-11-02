@@ -159,6 +159,7 @@ html,body,.reveal-viewport{background:var(--bg);color:var(--fg)}
 .reveal .huge{font:600 64px "JetBrains Mono",monospace;color:var(--accent);margin:.2em 0 .3em}
 .reveal pre.term.wrap{white-space:pre-wrap}
 .reveal pre.term.big{font-size:26px}
+.reveal pre.term.small{font-size:18px}
 .reveal .cols.three{grid-template-columns:1fr 1fr 1fr;gap:28px}
 .d .pod.wait{stroke-dasharray:9 6}
 .d .bad{fill:var(--panel);stroke:var(--bad);stroke-width:3}

@@ -25,17 +25,17 @@
 <section class="title">
   <div class="kicker">Module 3 · Lesson 16</div>
   <h1>Infrastructure as code<br>with Terraform</h1>
-  <p class="sub">Describe infrastructure in Git, preview each change, and rebuild it on demand</p>
+  <p class="sub">Keep infrastructure in Git, preview before you deploy, deploy only what changed</p>
   <aside class="notes">
     Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
-    Core class path: opening scenario, concepts, local Docker demo, drift drill, checks.
+    Core class path: opening scenario (10 min), concepts, local Docker demo, drift demo, team drill (15 min), checks, exit question (5 min).
   </aside>
 </section>
 
 <section>
-  <div class="kicker">Opening scenario · 10 minutes</div>
+  <div class="kicker">Opening scenario</div>
   <h2>How was production built?</h2>
-  <p class="lead">A college created its AWS network, EKS cluster, worker nodes, registry and Cloudflare DNS by clicking in two consoles.</p>
+  <p class="lead">A college's placement portal is moving to AWS. Its network, EKS cluster, worker nodes and registry were created by clicking in the AWS console, and its DNS in the Cloudflare console. The team now needs a test copy and a record of every change.</p>
   <ul class="lead">
     <li class="fragment">Test no longer matches production</li>
     <li class="fragment">Nobody knows who changed what</li>
@@ -58,20 +58,19 @@
       <p class="muted">Git records the change. CI previews and applies it.</p>
     </div>
   </div>
-  <p class="take">Terraform makes infrastructure changes reviewable and repeatable.</p>
+  <p class="take fragment">Terraform makes infrastructure changes reviewable and repeatable.</p>
 </section>
 
 <!-- ============ 01 Concepts ============ -->
 <section class="divider">
-  <div class="num">01</div>
-  <h2>Three ideas</h2>
-  <p>Declarative code, providers and state</p>
+  <h2>Terraform</h2>
+  <p>Declarative code and providers</p>
 </section>
 
 <section>
   <h2>Declarative code</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="1-5|7-14" data-fragment-index="0">
+<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="1-13|1-4|6-13" data-fragment-index="0">
 resource "docker_image" "web" {
   name         = "nginx:1.27-alpine"
   keep_locally = true
@@ -93,7 +92,7 @@ resource "docker_container" "web" {
       </div>
       <div class="step fragment current-visible" data-fragment-index="0">
         <h3>An image</h3>
-        <p>Terraform keeps <code>nginx:1.27-alpine</code> available.</p>
+        <p>Terraform makes <code>nginx:1.27-alpine</code> available.</p>
       </div>
       <div class="step fragment" data-fragment-index="1">
         <h3>A container</h3>
@@ -142,15 +141,14 @@ resource "docker_container" "web" {
     <tr><th>Choice</th><th>Useful for</th><th>Main limitation</th></tr>
     <tr><td>Console</td><td>Learning and experiments</td><td>No repeatable recipe</td></tr>
     <tr class="fragment"><td>CLI script</td><td>Simple one-time tasks</td><td>No model of what exists</td></tr>
-    <tr class="fragment"><td>CloudFormation / CDK</td><td>AWS-only environments</td><td>Cannot manage Cloudflare or GitHub</td></tr>
-    <tr class="fragment"><td><b>Terraform / OpenTofu</b></td><td>Many services through providers</td><td>The team must protect state</td></tr>
+    <tr class="fragment"><td>CloudFormation / CDK</td><td>AWS-focused environments</td><td>Built for AWS: Cloudflare DNS needs another tool</td></tr>
+    <tr class="fragment"><td><b>Terraform</b> or its open-source fork <b>OpenTofu</b></td><td>Many services through providers</td><td>Its record of what it created must be shared and protected</td></tr>
   </table>
-  <aside class="notes">OpenTofu uses the same configuration language and a similar command workflow.</aside>
+  <aside class="notes">OpenTofu uses the same configuration language and a similar command workflow. CloudFormation can reach some third-party services through registry extensions, but its home is AWS. The "record" in the last row is state, covered in section 03.</aside>
 </section>
 
 <!-- ============ 02 Workflow ============ -->
 <section class="divider">
-  <div class="num">02</div>
   <h2>The workflow</h2>
   <p>Initialize, preview, apply and remove</p>
 </section>
@@ -162,45 +160,28 @@ resource "docker_container" "web" {
     <tr><td><code>terraform init</code></td><td>Downloads providers and prepares the working directory</td></tr>
     <tr class="fragment"><td><code>terraform plan</code></td><td>Shows the proposed difference without changing infrastructure</td></tr>
     <tr class="fragment"><td><code>terraform apply</code></td><td>Makes the real resources match the configuration</td></tr>
-    <tr class="fragment"><td><code>terraform destroy</code></td><td>Proposes and removes everything recorded in this state</td></tr>
+    <tr class="fragment"><td><code>terraform destroy</code></td><td>Proposes and removes everything this configuration created</td></tr>
   </table>
-  <p class="take">The plan is the change reviewers inspect before apply.</p>
+  <p class="take fragment">You need to review the plan before you deploy it.</p>
   <aside class="notes">Source: https://developer.hashicorp.com/terraform/intro/core-workflow</aside>
 </section>
 
 <section>
-  <h2>Reading a plan</h2>
-  <div class="cols">
-<pre class="term big"><span class="ok">+ create</span>
-<span class="hi">~ update in place</span>
-<span class="bad">- destroy</span>
-<span class="bad">-/+ replace</span></pre>
-    <div>
-      <p class="lead"><code>-/+</code> deserves special attention.</p>
-      <p class="fragment">A replacement deletes the old resource and creates another one.</p>
-      <p class="fragment">For a container, that may be fine. For a database, it may destroy data.</p>
-    </div>
-  </div>
-  <p class="take">A plan exposes risky changes before any API call changes the resource.</p>
+  <h2>terraform init</h2>
+  <p class="lead">You write the spec in a file called <code>main.tf</code>. Run <code>init</code> once in that folder: it reads which providers <code>main.tf</code> needs and downloads them.</p>
+<pre class="term"><span class="cmd">terraform init</span>
+<span class="out">Initializing provider plugins...</span>
+<span class="out">- Finding kreuzwerker/docker versions matching "~> 3.6"...</span>
+<span class="out">- Installing kreuzwerker/docker v3.9.0...</span>
+<span class="ok">Terraform has been successfully initialized!</span></pre>
+  <p class="fragment">Run it again only when you add a provider or change its version.</p>
+  <p class="take fragment">init creates nothing in Docker or AWS. It only prepares the folder.</p>
 </section>
 
 <section>
-  <div class="kicker">Before the demo</div>
-  <h2>Terraform and Docker</h2>
-  <p class="lead">Install Terraform, start Docker Desktop and create an empty <code>iac-demo</code> folder.</p>
-<pre class="term"><span class="cm"># macOS: point the provider at Docker Desktop's active socket</span>
-<span class="cmd">export DOCKER_HOST=$(docker context inspect -f '{{.Endpoints.docker.Host}}')</span>
-<span class="cmd">echo $DOCKER_HOST</span>
-<span class="out">unix:///Users/you/.docker/run/docker.sock</span>
-<span class="cmd">terraform version</span></pre>
-  <p class="take">Windows users can skip the <code>DOCKER_HOST</code> step.</p>
-</section>
-
-<section>
-  <div class="kicker">Demo · main.tf</div>
-  <h2>Provider and variables</h2>
+  <h2>main.tf: the spec for one nginx container</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="1-8|10|12-15|17-20" data-fragment-index="0">
+<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1-8|10-12|14-21" data-fragment-index="0">
 terraform {
   required_providers {
     docker = {
@@ -210,7 +191,85 @@ terraform {
   }
 }
 
-provider "docker" {}
+resource "docker_image" "web" {
+  name = "nginx:1.27-alpine"
+}
+
+resource "docker_container" "web" {
+  name  = "web"
+  image = docker_image.web.image_id
+  ports {
+    internal = 80
+    external = 8080
+  }
+}
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0"><h3>Provider</h3><p>The Docker plugin that <code>init</code> downloads.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>Image</h3><p>Pull <code>nginx:1.27-alpine</code>.</p></div>
+      <div class="step fragment" data-fragment-index="1"><h3>Container</h3><p>Run it as <code>web</code>. Port <code>8080</code> on your laptop maps to port <code>80</code> inside the container.</p></div>
+    </div>
+  </div>
+  <aside class="notes">This is a complete main.tf: init, plan and apply work on it as is. The empty provider "docker" {} block is optional, so it is left out here. The demo later adds variables and an output to this same shape.</aside>
+</section>
+
+<section>
+  <h2>Reading a plan</h2>
+  <div class="cols wide-left">
+<pre class="term small"><span class="cmd">terraform plan</span>
+<span class="cm">  # docker_container.api will be updated in-place</span>
+<span class="hi">  ~ resource "docker_container" "api" {</span>
+<span class="hi">      ~ restart = "always" -> "no"</span>
+    }
+
+<span class="cm">  # docker_container.web must be replaced</span>
+<span class="bad">-/+ resource "docker_container" "web" {</span>
+      ~ ports {
+<span class="bad">          ~ external = 8081 -> 8082</span> <span class="cm"># forces replacement</span>
+        }
+    }
+
+<span class="cm">  # docker_network.shop will be created</span>
+<span class="ok">  + resource "docker_network" "shop" {</span>
+<span class="ok">      + name = "shop-net"</span>
+    }
+<span class="out">Plan: <span class="ok">2 to add</span>, <span class="hi">1 to change</span>, <span class="bad">1 to destroy</span>.</span></pre>
+    <div>
+      <p><code>+</code> create · <code>~</code> update in place<br><code>-</code> destroy · <code>-/+</code> replace</p>
+      <p class="fragment">The <code>#</code> line above each block says the action in words.</p>
+      <p class="fragment">A replacement counts as 1 add and 1 destroy in the last line.</p>
+      <p class="fragment"><code>-/+</code> on a container may be fine. On a database, it may destroy data.</p>
+    </div>
+  </div>
+  <aside class="notes">Trimmed sample: real output also lists unchanged attributes as hidden. Walk the three blocks top to bottom, then check the totals line together.</aside>
+  <p class="take">A plan exposes risky changes before any API call changes the resource.</p>
+</section>
+
+<section>
+  <div class="kicker">Before the demo</div>
+  <h2>Terraform and Docker</h2>
+  <p class="lead">Install Terraform, start Docker Desktop and create an empty <code>iac-demo</code> folder. The spec will go in <code>iac-demo/main.tf</code>.</p>
+<pre class="term"><span class="cm"># macOS: point the provider at Docker Desktop's active socket</span>
+<span class="cmd">export DOCKER_HOST=$(docker context inspect -f '{{.Endpoints.docker.Host}}')</span>
+<span class="cmd">echo $DOCKER_HOST</span>
+<span class="out">unix:///Users/you/.docker/run/docker.sock</span>
+<span class="cmd">terraform version</span></pre>
+  <p class="take">Windows and Linux users can skip the <code>DOCKER_HOST</code> step.</p>
+</section>
+
+<section>
+  <div class="kicker">Demo · main.tf</div>
+  <h2>Provider and variables</h2>
+  <div class="cols wide-left">
+<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1-8|10-13|15-18" data-fragment-index="0">
+terraform {
+  required_providers {
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.6"
+    }
+  }
+}
 
 variable "env" {
   type    = string
@@ -224,9 +283,8 @@ variable "port" {
 </code></pre>
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0"><h3>Plugin</h3><p>Use the Docker provider in the 3.x release line.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="0"><h3>Connection</h3><p>The provider uses the active Docker host.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="1"><h3>Environment</h3><p>The default name suffix is <code>dev</code>.</p></div>
-      <div class="step fragment" data-fragment-index="2"><h3>Port</h3><p>The default published port is <code>8081</code>.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>Variable</h3><p>An input to the spec. <code>env</code> is <code>dev</code> unless you supply another value.</p></div>
+      <div class="step fragment" data-fragment-index="1"><h3>Port</h3><p>Another input, <code>8081</code> by default. Later we supply prod values instead.</p></div>
     </div>
   </div>
 </section>
@@ -235,7 +293,7 @@ variable "port" {
   <div class="kicker">Demo · main.tf</div>
   <h2>Resources and output</h2>
   <div class="cols wide-left">
-<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1-4|6-14|16-18" data-fragment-index="0">
+<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1-4|6-13|15-17" data-fragment-index="0">
 resource "docker_image" "web" {
   name         = "nginx:1.27-alpine"
   keep_locally = true
@@ -344,17 +402,18 @@ output "url" {
 
 <span class="out">Plan: <span class="ok">1 to add</span>, 0 to change, <span class="bad">1 to destroy</span>.</span></pre>
   <p class="take">Docker cannot change a running container's published port, so Terraform proposes a new container.</p>
+  <p class="fragment">Don't apply. Set the default back to <code>8081</code>.</p>
 </section>
 
 <!-- ============ 03 State ============ -->
 <section class="divider">
-  <div class="num">03</div>
   <h2>State and drift</h2>
   <p>How Terraform knows what it manages</p>
 </section>
 
 <section>
-  <h2>State maps code to real objects</h2>
+  <h2>State: Terraform's record of what it built</h2>
+  <p class="lead">After <code>apply</code>, Terraform writes a file, <code>terraform.tfstate</code>, in the folder. It links each resource in the code to the real object it created.</p>
   <svg class="d" viewBox="0 0 1170 380" role="img" aria-label="A Terraform resource address maps through state to the real Docker container ID">
     <rect class="cp" x="20" y="110" width="320" height="150" rx="14"/>
     <text class="b" x="50" y="165">Configuration</text>
@@ -373,13 +432,44 @@ output "url" {
 </section>
 
 <section>
+  <h2>Inside terraform.tfstate</h2>
+  <div class="cols wide-left">
+<pre class="term small"><span class="cmd">cat terraform.tfstate</span>
+{
+  "version": 4,
+  "resources": [
+    {
+      <span class="hi">"type": "docker_container",</span>
+      <span class="hi">"name": "web",</span>
+      "instances": [{
+        "attributes": {
+          <span class="ok">"id": "93c6f1b2a7e4...",</span>
+          "name": "web-dev",
+          "restart": "no", ...
+        }
+      }]
+    }, <span class="cm">... docker_image.web ...</span>
+  ]
+}</pre>
+    <div>
+      <p><b>Plain JSON</b><br><span class="muted">Written by Terraform, never by hand</span></p>
+      <p class="fragment"><b>type + name</b><br><span class="muted">The code address <code>docker_container.web</code></span></p>
+      <p class="fragment"><b>id</b><br><span class="muted">The real container in Docker</span></p>
+      <p class="fragment"><b>Every attribute</b><br><span class="muted">In plain text, even AWS passwords</span></p>
+    </div>
+  </div>
+  <p class="take fragment">Read it with <code>terraform state list</code> and <code>terraform state show</code>.</p>
+  <aside class="notes">Trimmed. Real state also records the Terraform version, provider and dozens of attributes per resource. Run terraform state show docker_container.web to see them in readable form.</aside>
+</section>
+
+<section>
   <div class="kicker">Drift demo · change</div>
   <h2>A manual fix creates drift</h2>
 <pre class="term"><span class="cm"># someone changes the container outside Terraform</span>
 <span class="cmd">docker update --restart=always web-dev</span>
 <span class="cmd">terraform plan</span>
 <span class="hi">~ resource "docker_container" "web"</span>
-<span class="out">    restart = <span class="bad">"always"</span> -> <span class="ok">"no"</span></span>
+<span class="out">    ~ restart = <span class="bad">"always"</span> -> <span class="ok">"no"</span></span>
 <span class="out">Plan: 0 to add, <span class="hi">1 to change</span>, 0 to destroy.</span></pre>
   <p class="take"><b>Drift</b> means the real resource no longer matches the configuration.</p>
 </section>
@@ -406,8 +496,8 @@ output "url" {
     </div>
     <div class="card good fragment">
       <h3>Remote backend</h3>
-      <p>Store one encrypted state in S3 with restricted access.</p>
-      <p class="muted">CI and authorized engineers share it.</p>
+      <p>Keep the state file in an S3 bucket (AWS file storage), not on a laptop.</p>
+      <p class="muted">Everyone and CI read the same copy.</p>
     </div>
   </div>
   <p class="take">Never commit <code>terraform.tfstate</code>. It can contain secrets in plain text.</p>
@@ -416,7 +506,7 @@ output "url" {
 <section>
   <h2>S3 backend with locking</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="1-10|8|9">
+<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="3-5|6|7" data-fragment-index="0">
 terraform {
   backend "s3" {
     bucket       = "shop-terraform-state"
@@ -428,9 +518,9 @@ terraform {
 }
 </code></pre>
     <div>
-      <p><b>Remote</b><br><span class="muted">One current state for the team</span></p>
-      <p class="fragment"><b>Encrypted</b><br><span class="muted">State may include sensitive values</span></p>
-      <p class="fragment"><b>Locked</b><br><span class="muted">One plan or apply can hold the state at a time</span></p>
+      <p><b>bucket</b> <span class="muted">which S3 bucket</span><br><b>key</b> <span class="muted">the file name inside it</span><br><b>region</b> <span class="muted">where the bucket is</span></p>
+      <p class="fragment" data-fragment-index="0"><b>encrypt</b><br><span class="muted">State may include sensitive values</span></p>
+      <p class="fragment" data-fragment-index="1"><b>use_lockfile</b><br><span class="muted">One plan or apply can hold the state at a time</span></p>
     </div>
   </div>
   <aside class="notes">Source: https://developer.hashicorp.com/terraform/language/backend/s3</aside>
@@ -461,39 +551,81 @@ terraform {
 
 <!-- ============ 04 Environments and CI ============ -->
 <section class="divider">
-  <div class="num">04</div>
   <h2>Environments and CI</h2>
   <p>Reuse code without mixing state</p>
 </section>
 
 <section>
-  <h2>Two local environments for the demo</h2>
-<pre class="term"><span class="cmd">terraform workspace new prod</span>
-<span class="cmd">terraform apply -var env=prod -var port=8090</span>
-<span class="cmd">docker ps --format '{{.Names}} {{.Ports}}'</span>
-<span class="out">web-prod  0.0.0.0:8090->80/tcp</span>
-<span class="out">web-dev   0.0.0.0:8081->80/tcp</span>
-<span class="cmd">terraform workspace list</span>
-<span class="out">  default</span>
-<span class="out">* prod</span></pre>
-  <p class="take">A CLI workspace gives the same configuration a separate state. It is useful for this laptop demo.</p>
+  <h2>A second environment: one folder each</h2>
+  <p class="lead">Move <code>main.tf</code> into <code>modules/web</code>. It becomes a <b>module</b>: code that other folders reuse with their own values, like a function.</p>
+<pre class="term">iac-demo/
+├── modules/web/
+│   └── main.tf       <span class="cm"># the spec you already wrote</span>
+└── envs/
+    ├── dev/main.tf   <span class="cm"># web with env "dev",  port 8081</span>
+    └── prod/main.tf  <span class="cm"># web with env "prod", port 8090</span></pre>
+  <p class="take fragment">Each <code>envs</code> folder is its own Terraform folder, with its own state.</p>
 </section>
 
 <section>
-  <h2>Production needs stronger isolation</h2>
-  <div class="cols">
-    <div>
-      <h3>Shared modules</h3>
-      <p>Write the VPC, EKS cluster and node group once.</p>
-      <p class="muted">Inputs include node size and count.</p>
-    </div>
-    <div class="fragment">
-      <h3>Separate roots and backends</h3>
-      <p>Staging and production call the modules from different root configurations.</p>
-      <p class="muted">Each can have its own state, credentials and access controls.</p>
+  <div class="kicker">Demo · envs/prod/main.tf</div>
+  <h2>Call the module with prod values</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-hcl" data-trim data-line-numbers="1-5|2|3-4" data-fragment-index="0">
+module "web" {
+  source = "../../modules/web"
+  env    = "prod"
+  port   = 8090
+}
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0"><h3>Module call</h3><p>Use the code in another folder.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>source</h3><p>Where that folder is, from here.</p></div>
+      <div class="step fragment" data-fragment-index="1"><h3>Values</h3><p>These replace the variable defaults <code>dev</code> and <code>8081</code>.</p></div>
     </div>
   </div>
-  <p class="take">CLI workspaces share one backend, so they are not strong production isolation.</p>
+  <p class="take"><code>envs/dev/main.tf</code> is the same with <code>"dev"</code> and <code>8081</code>.</p>
+  <aside class="notes">No terraform block is needed here: the module's own main.tf already says it needs kreuzwerker/docker, and init in this folder downloads it.</aside>
+</section>
+
+<section>
+  <div class="kicker">Demo</div>
+  <h2>Two environments on one laptop</h2>
+<pre class="term"><span class="cmd">terraform destroy</span>            <span class="cm"># frees web-dev and port 8081</span>
+<span class="cmd">mkdir -p modules/web envs/dev envs/prod</span>
+<span class="cmd">mv main.tf modules/web/</span>
+<span class="cm"># write envs/dev/main.tf and envs/prod/main.tf</span>
+<span class="cmd">cd envs/dev  &amp;&amp; terraform init &amp;&amp; terraform apply</span>
+<span class="cmd">cd ../prod   &amp;&amp; terraform init &amp;&amp; terraform apply</span>
+<span class="cmd">docker ps --format '{{.Names}} {{.Ports}}'</span>
+<span class="out">web-prod  0.0.0.0:8090->80/tcp</span>
+<span class="out">web-dev   0.0.0.0:8081->80/tcp</span></pre>
+  <p class="take">The folder you are in is the environment you change.</p>
+  <aside class="notes">The first destroy runs in iac-demo, where the single-folder demo lives; the dev folder then recreates web-dev under its own state. The old .terraform folder, lock file and empty state in iac-demo can be deleted.</aside>
+</section>
+
+<section>
+  <h2>A real team: same layout, plus remote state</h2>
+  <div class="cols wide-left">
+<pre class="term small">infra/
+├── modules/
+│   └── platform/      <span class="cm"># VPC, EKS, nodes, ECR</span>
+│       ├── main.tf
+│       └── variables.tf
+└── envs/
+    ├── staging/
+    │   ├── main.tf    <span class="cm"># platform: 2 × t3.medium</span>
+    │   └── backend.tf <span class="cm"># staging state</span>
+    └── prod/
+        ├── main.tf    <span class="cm"># platform: 5 × m5.large</span>
+        └── backend.tf <span class="cm"># prod state</span></pre>
+    <div>
+      <p><b>Same layout as the demo</b><br><span class="muted">One module, one folder per environment</span></p>
+      <p class="fragment"><b>backend.tf</b><br><span class="muted">Each folder keeps its state in S3, with locking</span></p>
+      <p class="fragment"><b>Prod credentials</b><br><span class="muted">Only the prod CI pipeline applies to prod</span></p>
+    </div>
+  </div>
+  <aside class="notes">envs/prod/main.tf calls module "platform" with instance_type = "m5.large" and node_count = 5. The AWS code a few slides later is what lives inside modules/platform. Prod state often sits in a separate AWS account.</aside>
 </section>
 
 <section>
@@ -501,7 +633,7 @@ terraform {
   <svg class="d" viewBox="0 0 1170 420" role="img" aria-label="A developer changes Terraform code, opens a pull request, CI posts a plan for review, then CI applies the approved change to AWS">
     <rect class="cp" x="10" y="120" width="210" height="140" rx="14"/>
     <text class="b" x="40" y="172">Git branch</text>
-    <text class="m" x="40" y="212">prod.tfvars</text>
+    <text class="m" x="40" y="212">node_count = 5</text>
     <g class="fragment">
       <path class="arrow" d="M222,190 L285,190"/>
       <rect class="svc" x="300" y="120" width="220" height="140" rx="14"/>
@@ -527,16 +659,19 @@ terraform {
 <section>
   <h2>The AWS configuration has the same shape</h2>
   <div class="cols wide-left">
-<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1|3-13|15|17">
+<pre class="yaml"><code class="language-hcl" data-trim data-line-numbers="1|3-16|18-20" data-fragment-index="0">
 provider "aws" { region = "ap-south-1" }
 
 module "eks" {
   source       = "terraform-aws-modules/eks/aws"
-  cluster_name = "shop-${var.environment}"
+  version      = "~> 20.0"
+  cluster_name = "shop-${var.env}"
 
   eks_managed_node_groups = {
     default = {
       instance_types = [var.instance_type]
+      min_size       = var.node_count
+      max_size       = var.node_count
       desired_size   = var.node_count
     }
   }
@@ -548,18 +683,18 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }
 </code></pre>
     <div>
       <p><b>Provider</b><br><span class="muted">Talk to AWS in Mumbai</span></p>
-      <p class="fragment"><b>Module</b><br><span class="muted">Create EKS resources from reusable code</span></p>
-      <p class="fragment"><b>Resource and output</b><br><span class="muted">Create ECR and publish its URL</span></p>
+      <p class="fragment" data-fragment-index="0"><b>Module</b><br><span class="muted">Create EKS resources from reusable code</span></p>
+      <p class="fragment" data-fragment-index="1"><b>Resource and output</b><br><span class="muted">Create ECR and publish its URL</span></p>
     </div>
   </div>
-  <aside class="notes">Read only. A real EKS deployment also supplies VPC and subnet inputs and requires careful module version pinning.</aside>
+  <aside class="notes">Read only. A real EKS deployment also supplies VPC and subnet inputs and requires careful module version pinning. After the node group exists, the module ignores later changes to desired_size, so node_count also sets min_size and max_size. That is what makes the 3 to 5 change in the previous slide plan as 1 to change.</aside>
 </section>
 
 <!-- ============ Drill ============ -->
 <section class="divider">
   <div class="num">!</div>
   <h2>Spot the problems</h2>
-  <p>15-minute team drill</p>
+  <p>Team drill</p>
 </section>
 
 <section>
@@ -579,7 +714,7 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }
     <tr><th>Risk</th><th>Practice</th></tr>
     <tr><td>State leaks secrets and copies diverge</td><td>Encrypted remote backend, restricted access</td></tr>
     <tr class="fragment"><td>Applies overlap or skip review</td><td>Lock state; run apply from CI after approval</td></tr>
-    <tr class="fragment"><td>Password remains in Git history</td><td>Supply it from a secrets manager or CI secret</td></tr>
+    <tr class="fragment"><td>Password remains in Git history</td><td>Supply it from a secrets manager or CI secret. It still lands in state, so keep state encrypted and restricted</td></tr>
     <tr class="fragment"><td>Console change creates drift</td><td>Change code; run scheduled plans to detect drift</td></tr>
   </table>
 </section>
@@ -587,9 +722,9 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }
 <section>
   <div class="kicker">Cleanup</div>
   <h2>Remove both demo environments</h2>
-<pre class="term"><span class="cmd">terraform destroy -var env=prod -var port=8090</span>
-<span class="cmd">terraform workspace select default</span>
-<span class="cmd">terraform destroy</span>
+<pre class="term"><span class="cm"># from the iac-demo folder</span>
+<span class="cmd">cd envs/prod &amp;&amp; terraform destroy</span>
+<span class="cmd">cd ../dev    &amp;&amp; terraform destroy</span>
 <span class="cmd">docker ps -a --filter name=web</span></pre>
   <p class="take">In a cloud account, verify failed or retained resources and check billing after destroy.</p>
 </section>
@@ -626,7 +761,7 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }
 </section>
 
 <section>
-  <div class="kicker">Exit question · 5 minutes</div>
+  <div class="kicker">Exit question</div>
   <p class="q">Your team creates dev and prod EKS clusters by clicking in the AWS console. Convince them to use Terraform. Explain the path from Git to AWS and how two engineers avoid overwriting each other.</p>
   <div class="a fragment">Keep shared modules and environment inputs in Git. CI posts <code>plan</code> on the pull request, then runs <code>apply</code> after approval. Separate encrypted remote states record dev and prod. State locking allows one writer at a time.</div>
 </section>
@@ -656,6 +791,28 @@ output "registry_url" { value = aws_ecr_repository.api.repository_url }
     transition: 'fade',
     transitionSpeed: 'fast',
     plugins: [RevealNotes, RevealHighlight],
+    highlight: {
+      // The bundled highlight.js has no HCL; without a language the
+      // line-number steps stack as separate copies instead of overlaying
+      beforeHighlight: function (hljs) {
+        hljs.registerLanguage('hcl', function () {
+          return {
+            name: 'HCL',
+            contains: [
+              hljs.HASH_COMMENT_MODE,
+              {
+                className: 'string', begin: '"', end: '"',
+                contains: [{ className: 'subst', begin: /\$\{/, end: /\}/ }]
+              },
+              { className: 'keyword', begin: /\b[a-z_]+(?=\s+("|\{))/ },
+              { className: 'attr', begin: /[a-z_]+(?=\s*=)/ },
+              { className: 'literal', begin: /\b(true|false|null)\b/ },
+              hljs.NUMBER_MODE
+            ]
+          };
+        });
+      }
+    },
     keyboard: {
       // T cycles the course theme: system, light, dark
       84: function () {

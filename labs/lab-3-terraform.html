@@ -1,0 +1,404 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lab 3 — hello-app with Terraform</title><link rel="stylesheet" href="../assets/course.css"><script src="../assets/theme.js"></script></head><body><main>
+<div class="kicker"><a href="../index.html">Course home</a> · Lab 03 · 2.5 hours</div>
+<h1>Lab 3 — Running hello-app on Kubernetes with Terraform</h1>
+<p class="lede"><b>Duration:</b> 2 hours 30 minutes, plus an optional take-home on AWS. <b>Working mode:</b> solo. Everyone types every command on their own laptop.</p>
+
+<p>In Lab 2 you ran <code>hello-app</code> on your 3-node cluster with <code>kubectl</code>. In this lab you describe the same Deployment and Service in Terraform files, and Terraform creates them. Then you update the app, catch changes made by hand, build a <code>dev</code> and a <code>prod</code> copy from one module, and break it on purpose. Everything runs on your laptop. The take-home at the end moves your state to AWS.</p>
+
+<h2>Before you start</h2>
+<p>Do this <em>the night before</em>, not in the lab.</p>
+<ol class="steps">
+<li>Install Terraform if you skipped it in lesson 16: on macOS <code>brew install hashicorp/tap/terraform</code>, on Windows <code>winget install Hashicorp.Terraform</code>. Check it:
+<pre><code>terraform version</code></pre></li>
+<li>Check that your cluster is running with three nodes:
+<pre><code>kubectl config current-context    # docker-desktop
+kubectl get nodes                 # 3 nodes, all Ready</code></pre></li>
+</ol>
+<p>You don't build an image in this lab. You use <code>shripada/hello-app:v1</code> and <code>shripada/hello-app:v2</code> from Docker Hub. v1 is the page from Lab 2. v2 says "v2" in the heading and highlights in green.</p>
+
+<h2>The plan</h2>
+<table class="schedule">
+<tr><th>Time</th><th>Block</th></tr>
+<tr><td>0:00–0:15</td><td><a href="#b1">Set up your repository</a></td></tr>
+<tr><td>0:15–0:50</td><td><a href="#b2">Part 1: write it in Terraform</a></td></tr>
+<tr><td>0:50–1:05</td><td><a href="#b3">Part 2: update the image</a></td></tr>
+<tr><td>1:05–1:15</td><td>Break</td></tr>
+<tr><td>1:15–1:35</td><td><a href="#b4">Part 3: catch changes made by hand</a></td></tr>
+<tr><td>1:35–2:05</td><td><a href="#b5">Part 4: dev and prod from one module</a></td></tr>
+<tr><td>2:05–2:20</td><td><a href="#b6">Break it on purpose</a></td></tr>
+<tr><td>2:20–2:30</td><td><a href="#b7">Submit and clean up</a></td></tr>
+<tr><td>Take-home</td><td><a href="#b8">Optional: move your state to AWS</a></td></tr>
+</table>
+
+<h2 id="b1"><span class="lab-time">0:00–0:15</span> Set up your repository</h2>
+<ol class="steps">
+<li>Open <a href="https://github.com/shripada/ms-cloud-devops-lab3">github.com/shripada/ms-cloud-devops-lab3</a>, click <b>Use this template → Create a new repository</b>, name it <code>ms-cloud-devops-lab3</code>, and make it <b>public</b>.</li>
+<li>Clone <em>your</em> copy and move into it:
+<pre><code>git clone https://github.com/&lt;your-github-username&gt;/ms-cloud-devops-lab3
+cd ms-cloud-devops-lab3</code></pre></li>
+<li>Open <code>.gitignore</code> and read it. It keeps <code>.terraform/</code> and every <code>terraform.tfstate</code> file out of Git. You saw why in lesson 16: the state holds every setting in plain text.</li>
+<li>Clear anything left over from Lab 2:
+<pre><code>kubectl get all</code></pre>
+If you see <code>deployment.apps/hello-app</code> or <code>service/hello-app</code>, delete them with <code>kubectl delete service,deployment hello-app</code>. Your Service needs port 8080, and later your prod copy needs 8090.</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> <code>terraform version</code> works, three Ready nodes, your repository cloned, and no <code>hello-app</code> left in <code>kubectl get all</code>.</div>
+
+<h2 id="b2"><span class="lab-time">0:15–0:50</span> Part 1: write it in Terraform</h2>
+<p>Create <code>main.tf</code> in the root of your repository. Start with the provider and the variables:</p>
+<pre><code>terraform {
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~&gt; 3.4"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path    = "~/.kube/config"
+  config_context = "docker-desktop"
+}
+
+variable "image_tag" {
+  type    = string
+  default = "v1"
+}
+
+variable "replicas" {
+  type    = number
+  default = 3
+}
+
+variable "port" {
+  type    = number
+  default = 8080
+}</code></pre>
+<p>The provider block tells the Kubernetes plugin which cluster to talk to. It reads the same file <code>kubectl</code> uses, <code>~/.kube/config</code>, and picks the <code>docker-desktop</code> context, so Terraform reaches the same cluster as <code>kubectl</code>.</p>
+<p>Now add two resources. They hold the same settings as your <code>hello-app.yaml</code> from Lab 2, written in Terraform's language. Two differences in how you write them:</p>
+<ul>
+<li>A list item in YAML (<code>- name: hello-app</code> under <code>containers:</code>) becomes a block: <code>container { ... }</code>. Two ports would be two <code>port { ... }</code> blocks.</li>
+<li>Field names use underscores: <code>containerPort</code> becomes <code>container_port</code>, <code>matchLabels</code> becomes <code>match_labels</code>, <code>targetPort</code> becomes <code>target_port</code>.</li>
+</ul>
+<p>Write them from this outline:</p>
+<ul>
+<li>A <code>kubernetes_deployment_v1</code> named <code>hello</code>. In <code>metadata</code>, the name <code>hello-app</code>. In <code>spec</code>: <code>replicas = var.replicas</code>, a <code>selector</code> with <code>match_labels</code> <code>app = "hello-app"</code>, and a <code>template</code> with the same label and one <code>container</code> named <code>hello-app</code>, running <code>"shripada/hello-app:${var.image_tag}"</code>, with <code>container_port = 80</code>.</li>
+<li>A <code>kubernetes_service_v1</code> named <code>hello</code>. In <code>metadata</code>, the name <code>hello-app</code>. In <code>spec</code>: <code>type = "LoadBalancer"</code>, <code>selector</code> <code>app = "hello-app"</code>, and one <code>port</code> with <code>port = var.port</code> and <code>target_port = 80</code>.</li>
+<li>An <code>output</code> named <code>url</code> with the value <code>"http://localhost:${var.port}"</code>.</li>
+</ul>
+<p>Write it yourself before you open the hint below.</p>
+<details><summary>Hint: the rest of the file</summary>
+<pre><code>resource "kubernetes_deployment_v1" "hello" {
+  metadata {
+    name = "hello-app"
+  }
+  spec {
+    replicas = var.replicas
+    selector {
+      match_labels = {
+        app = "hello-app"
+      }
+    }
+    template {
+      metadata {
+        labels = {
+          app = "hello-app"
+        }
+      }
+      spec {
+        container {
+          name  = "hello-app"
+          image = "shripada/hello-app:${var.image_tag}"
+          port {
+            container_port = 80
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "hello" {
+  metadata {
+    name = "hello-app"
+  }
+  spec {
+    type = "LoadBalancer"
+    selector = {
+      app = "hello-app"
+    }
+    port {
+      port        = var.port
+      target_port = 80
+    }
+  }
+}
+
+output "url" {
+  value = "http://localhost:${var.port}"
+}</code></pre>
+</details>
+<ol class="steps">
+<li>Download the provider, then let Terraform tidy your spacing and check the file:
+<pre><code>terraform init
+terraform fmt
+terraform validate</code></pre>
+<code>fmt</code> lines up the <code>=</code> signs. <code>validate</code> catches typos such as <code>containerPort</code> before you go near the cluster.</li>
+<li><b>Predict first:</b> how many resources will the plan create? Then:
+<pre><code>terraform plan</code></pre>
+Find the <code>Plan:</code> line. Scroll up and find <code>namespace = "default"</code>: you didn't write a namespace, so Terraform uses <code>default</code>, just as <code>kubectl</code> did. Paste the <code>Plan:</code> line into your README.</li>
+<li>Create it:
+<pre><code>terraform apply
+kubectl get pods -o wide
+terraform output -raw url</code></pre>
+Type <code>yes</code>. Apply waits until all three Pods are ready before it says <b>Apply complete!</b>, so the first run can take half a minute while the nodes pull the image. Paste the output value into your README.</li>
+<li>Open <a href="http://localhost:8080">http://localhost:8080</a>. The table fills with three Pod names, the same names <code>kubectl get pods</code> shows.</li>
+<li><b>Predict first:</b> what happens if you run <code>terraform apply</code> again without changing anything? Run it and check.</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> the page shows three Pod names, and a second <code>terraform apply</code> says <b>No changes</b>.</div>
+
+<h2 id="b3"><span class="lab-time">0:50–1:05</span> Part 2: update the image</h2>
+<p>Keep the browser tab open on <a href="http://localhost:8080">http://localhost:8080</a>.</p>
+<ol class="steps">
+<li>In <code>main.tf</code>, change the default of <code>image_tag</code> from <code>"v1"</code> to <code>"v2"</code>.</li>
+<li><b>Predict first:</b> in lesson 16, changing the container's port made Terraform delete the container and create a new one. Will changing the image do the same here?
+<pre><code>terraform plan</code></pre>
+Look for <code>~ update in-place</code>, the line <code>image = "shripada/hello-app:v1" -&gt; "shripada/hello-app:v2"</code>, and <code>Plan: 0 to add, 1 to change, 0 to destroy</code>. Docker couldn't change a running container, so Terraform had to replace it. A Kubernetes Deployment can change its Pod template while it runs, so Terraform only updates it. Paste these lines into your README.</li>
+<li>Apply it, and watch the browser while it runs:
+<pre><code>terraform apply
+kubectl get rs</code></pre>
+New Pod names join the table one by one as the Deployment rolls out the new Pods and removes the old ones. The page you have open is still the old one, so refresh it: the heading now ends in <b>v2</b> and the highlights are green. <code>kubectl get rs</code> shows the old ReplicaSet with 0 Pods and the new one with 3. It is the same rolling update you saw in lesson 13, started from a file.</li>
+</ol>
+<p class="aside"><b>Optional, if you still have your Lab 2 repository:</b> change the heading in <code>src/App.jsx</code>, build and push <code>&lt;user&gt;/hello-app:v2</code>, and change <code>shripada/hello-app</code> in <code>main.tf</code> to <code>&lt;user&gt;/hello-app</code>. Plan and apply again.</p>
+<div class="checkpoint"><b>Checkpoint:</b> after a refresh, the page says v2, and <code>terraform apply</code> says <b>No changes</b>.</div>
+
+<h2 id="b4"><span class="lab-time">1:15–1:35</span> Part 3: catch changes made by hand</h2>
+<p>Your teammate needs more Pods for a demo and runs one quick command instead of changing the code.</p>
+<ol class="steps">
+<li>Make the change by hand:
+<pre><code>kubectl scale deployment hello-app --replicas=5
+kubectl get pods</code></pre>
+Five Pod names appear in the browser.</li>
+<li><b>Predict first:</b> <code>main.tf</code> didn't change. What will the plan show?
+<pre><code>terraform plan</code></pre>
+<code>~ replicas = "5" -&gt; "3"</code> and <code>1 to change</code>. Terraform read the real Deployment, compared it with the code, and found the difference. This is drift. Paste the plan into your README.</li>
+<li>Put it back with <code>terraform apply</code>. Two Pod names stop getting new answers in the browser.</li>
+<li>Now someone deletes the Service:
+<pre><code>kubectl delete service hello-app
+terraform plan</code></pre>
+The page shows an error. The plan says <code>kubernetes_service_v1.hello will be created</code>. Run <code>terraform apply</code>, and the page recovers.</li>
+</ol>
+<p class="aside">The code is the record of what should exist. Once Terraform manages an object, changes go into <code>main.tf</code>. A <code>kubectl</code> change by hand lasts only until the next <code>terraform apply</code>.</p>
+<div class="checkpoint"><b>Checkpoint:</b> three Pods, the page works, and <code>terraform plan</code> says <b>No changes</b>.</div>
+
+<h2 id="b5"><span class="lab-time">1:35–2:05</span> Part 4: dev and prod from one module</h2>
+<p>The team wants two copies of hello-app: <code>dev</code> on port 8080 for testing, and <code>prod</code> on 8090. Each copy gets its own namespace. You will turn <code>main.tf</code> into a module, as in lesson 16, and call it from one folder per environment.</p>
+<ol class="steps">
+<li>Remove the single-folder copy so port 8080 is free, then make the folders and move the file:
+<pre><code>terraform destroy
+rm -rf .terraform .terraform.lock.hcl terraform.tfstate*
+mkdir -p modules/hello-app envs/dev envs/prod
+mv main.tf modules/hello-app/</code></pre></li>
+<li>In <code>modules/hello-app/main.tf</code>, add a variable with no default, so every environment must choose its own namespace:
+<pre><code>variable "namespace" {
+  type = string
+}</code></pre></li>
+<li>Add a namespace resource, above the Deployment:
+<pre><code>resource "kubernetes_namespace_v1" "env" {
+  metadata {
+    name = var.namespace
+  }
+}</code></pre></li>
+<li>In the <code>metadata</code> of the Deployment <em>and</em> of the Service, add a namespace line under the name:
+<pre><code>  metadata {
+    name      = "hello-app"
+    namespace = kubernetes_namespace_v1.env.metadata[0].name
+  }</code></pre>
+The Deployment and Service now refer to the namespace resource, so Terraform creates the namespace first.</li>
+<li>Write <code>envs/dev/main.tf</code>:
+<pre><code>module "hello" {
+  source    = "../../modules/hello-app"
+  namespace = "dev"
+  port      = 8080
+}</code></pre>
+Write <code>envs/prod/main.tf</code> the same way, with <code>"prod"</code> and <code>8090</code>. Your folders now look like this:
+<pre><code>ms-cloud-devops-lab3/
+├── modules/hello-app/
+│   └── main.tf       # the code you wrote in Part 1, plus the namespace
+└── envs/
+    ├── dev/main.tf
+    └── prod/main.tf</code></pre></li>
+<li>Each environment folder is its own Terraform folder, so each needs its own <code>init</code>:
+<pre><code>cd envs/dev  &amp;&amp; terraform init &amp;&amp; terraform apply
+cd ../prod   &amp;&amp; terraform init &amp;&amp; terraform apply
+kubectl get svc -A</code></pre>
+Two <code>hello-app</code> Services, one in <code>dev</code> on 8080 and one in <code>prod</code> on 8090. Open <a href="http://localhost:8080">localhost:8080</a> and <a href="http://localhost:8090">localhost:8090</a> side by side: different Pod names, because they are different Pods. Paste the <code>kubectl get svc -A</code> output into your README.</li>
+<li><b>Predict first:</b> in <code>envs/dev/main.tf</code>, change <code>"dev"</code> to <code>"development"</code>. What will happen to the running Pods?
+<pre><code>cd ../dev
+terraform plan</code></pre>
+Every resource says <code># forces replacement</code>, and the plan is <code>3 to add, 0 to change, 3 to destroy</code>. An object can't move to another namespace, so Terraform must delete it and create a new one. Don't apply it. Change the name back to <code>"dev"</code>. Reading the plan before you type <code>yes</code> is what saves prod.</li>
+</ol>
+<div class="checkpoint"><b>Checkpoint:</b> both pages work, and <code>terraform plan</code> says <b>No changes</b> in both <code>envs/dev</code> and <code>envs/prod</code>.</div>
+
+<h2 id="b6"><span class="lab-time">2:05–2:20</span> Break it on purpose</h2>
+<p>Work in <code>envs/dev</code>. Keep both browser tabs open.</p>
+<div class="trap"><b>Trap 1 — the lost state file.</b> Your laptop's disk "fails", and only the state file is lost. In <code>envs/dev</code>:
+<pre><code>rm terraform.tfstate
+terraform plan</code></pre>
+<b>Predict first:</b> the dev Pods are still running. What does the plan say? It says <code>3 to add</code>: with no state, Terraform has no record that it ever made anything. Now run <code>terraform apply</code> and type <code>yes</code>. It fails with <code>namespaces "dev" already exists</code>. The state file is Terraform's only memory, and it links each resource in your code to a real object. (The <code>terraform.tfstate.backup</code> file is one step behind; don't rely on it.) Paste the error into your README.
+<p>To recover, delete what Terraform has forgotten, then apply again. Deleting a namespace deletes everything inside it:</p>
+<pre><code>kubectl delete namespace dev
+terraform apply</code></pre>
+On a laptop that's fine. On a real prod system you can't delete and recreate everything. That's why teams keep state in a remote backend. The take-home does exactly that.</div>
+<div class="trap"><b>Trap 2 — the wrong selector.</b> In <code>modules/hello-app/main.tf</code>, in the <b>Service</b>, change the selector to <code>app = "helo-app"</code> (one <code>l</code>). From <code>envs/dev</code>:
+<pre><code>terraform apply</code></pre>
+The plan shows <code>"app" = "hello-app" -&gt; "helo-app"</code>, and apply completes with no error. Now look at the dev page: it shows an error. The prod page still works, because you only applied in <code>envs/dev</code>. Find the cause:
+<pre><code>kubectl get endpointslices -n dev -l kubernetes.io/service-name=hello-app</code></pre>
+The EndpointSlice is empty, the same as Lab 2's trap 2. Terraform checks that the cluster matches your code. It doesn't check that your code is right. Fix the typo, run <code>terraform apply</code>, and the page recovers. Write what you saw in your README.</div>
+
+<h2 id="b7"><span class="lab-time">2:20–2:30</span> Submit and clean up</h2>
+<ol class="steps">
+<li>Fill in every section of <code>README.md</code>, and save a browser screenshot of the dev and prod pages as <code>screenshot.png</code> in the repository root.</li>
+<li>From the repository root, stage everything and check what Git will commit:
+<pre><code>git add .
+git status</code></pre>
+You should see the three <code>main.tf</code> files, the two <code>.terraform.lock.hcl</code> files, <code>README.md</code> and <code>screenshot.png</code>. If any <code>terraform.tfstate</code> file is listed, stop: your <code>.gitignore</code> is missing or broken.</li>
+<li>Commit and push, then check the files on GitHub:
+<pre><code>git commit -m "Lab 3 submission"
+git push</code></pre></li>
+<li>Delete both environments:
+<pre><code>cd envs/prod &amp;&amp; terraform destroy
+cd ../dev    &amp;&amp; terraform destroy
+kubectl get ns</code></pre>
+No <code>dev</code> or <code>prod</code> namespace is left. Skip this step if you are going to do the take-home tonight: it needs <code>envs/dev</code> running.</li>
+</ol>
+
+<p>Before you leave, you should be able to answer these without looking:</p>
+<div class="quiz recall">
+<p class="q">1. You run <code>terraform apply</code> twice without changing anything. The second run says "No changes". What did Terraform do to decide that?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>It read the real Deployment and Service from the cluster, using the IDs saved in the state file, and compared their settings with the code. They already matched, so there was nothing to create, change or destroy.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">2. Changing the image tag gave <code>update in-place</code>. Changing the namespace gave <code>forces replacement</code>. Why the difference?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>A Deployment can change its Pod template while it runs: Kubernetes rolls out new Pods with the new image, so Terraform only updates it. An object can't move to another namespace, so the only way is to delete it and create a new one. That means the running Pods go away, which is why you read the plan before typing yes.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">3. Someone ran <code>kubectl scale deployment hello-app --replicas=5</code>. The code says 3. What does the next <code>terraform plan</code> show, and what does <code>apply</code> do?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The plan shows drift: <code>replicas = "5" -&gt; "3"</code>, 1 to change. Apply sets the Deployment back to 3 replicas, so the hand change is lost. If 5 is really needed, the change goes into the code.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">4. After you deleted <code>terraform.tfstate</code>, apply failed with "already exists". Why? Where should the state live in a team?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>The state file links each resource in the code to a real object. Without it, Terraform thought nothing existed and tried to create everything, and Kubernetes refused because the objects were still there. In a team, the state goes in a remote backend, such as an encrypted, versioned S3 bucket with locking, not on one laptop and not in Git.</p></details>
+</div>
+<div class="quiz recall">
+<p class="q">5. <code>terraform apply</code> finished with no errors, but the page doesn't load. What does that tell you, and what do you check?</p>
+<textarea placeholder="From memory…"></textarea>
+<details><summary>Model answer</summary><p>It tells you the cluster now matches the code. It says nothing about whether the code is right. Check the Service's EndpointSlice: if it's empty, the selector doesn't match the Pods' labels. If it lists Pods on the wrong port, the <code>target_port</code> is wrong.</p></details>
+</div>
+
+<h2>Common mistakes</h2>
+<ul>
+<li>Running Terraform in the wrong folder. The folder you are in is the environment you change: check with <code>pwd</code> before <code>apply</code>.</li>
+<li>Forgetting <code>terraform init</code> in a new folder: you get <code>Module not installed</code> or <code>Missing required provider</code>.</li>
+<li>Writing YAML names in Terraform: <code>containerPort</code> instead of <code>container_port</code>, or <code>containers</code> instead of <code>container</code>.</li>
+<li>Leaving Lab 2's Service on port 8080, so the new Service's port clashes with it.</li>
+<li>Changing an object with <code>kubectl</code> and being surprised when the next apply undoes it.</li>
+<li>Committing a <code>terraform.tfstate</code> file. Always run <code>git status</code> before you commit.</li>
+</ul>
+
+<h2 id="b8"><span class="lab-time">Take-home</span> Optional: move your state to AWS</h2>
+<p>In Trap 1, losing one file meant deleting and recreating dev. Here you create an S3 bucket with Terraform, catch a change someone makes in the AWS console, and then move <code>envs/dev</code>'s state into that bucket, with locking.</p>
+<div class="trap"><b>Money first.</b> This uses your own AWS account. One small S3 bucket costs a few paise at most, but a bill reaches you only if you forget something. Finish with the clean-up steps at the end, and check the <b>Billing</b> page in the console afterwards.</div>
+<ol class="steps">
+<li>Set up access. In the AWS console, create an IAM user for yourself (not the root user) with an access key. Then:
+<pre><code>aws configure                 # region: ap-south-1
+aws sts get-caller-identity   # shows your account and user</code></pre></li>
+<li>Make sure <code>envs/dev</code> is running (<code>terraform apply</code> there, if you destroyed it).</li>
+<li>Create a folder <code>aws</code> in your repository with this <code>main.tf</code>. Bucket names are shared by every AWS account in the world, so put your GitHub username in yours (lowercase, no spaces):
+<pre><code>terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "ap-south-1"
+}
+
+variable "bucket_name" {
+  type    = string
+  default = "&lt;your-github-username&gt;-lab3-state"
+}
+
+resource "aws_s3_bucket" "state" {
+  bucket        = var.bucket_name
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_versioning" "state" {
+  bucket = aws_s3_bucket.state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "state" {
+  bucket                  = aws_s3_bucket.state.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+output "bucket" {
+  value = aws_s3_bucket.state.bucket
+}</code></pre>
+Versioning keeps every old copy of the state, so a bad write can be undone. The public access block makes sure nobody can make the bucket public. <code>force_destroy = true</code> lets <code>terraform destroy</code> delete the bucket even with files in it. It's there so you can clean up the lab; leave it out on a real state bucket.</li>
+<li>Create it, from the <code>aws</code> folder:
+<pre><code>cd aws
+terraform init
+terraform apply
+terraform output -raw bucket</code></pre></li>
+<li>Drift on a real cloud. In the AWS console, open <b>S3</b> → your bucket → <b>Properties</b> → <b>Bucket Versioning</b> → <b>Edit</b> → <b>Suspend</b> → <b>Save changes</b>. Then:
+<pre><code>terraform plan</code></pre>
+<code>~ status = "Suspended" -&gt; "Enabled"</code>. Run <code>terraform apply</code> and check the console again: versioning is back on. This is the drift from Part 3, on AWS.</li>
+<li>Move dev's state into the bucket. Create <code>envs/dev/backend.tf</code>, with your bucket name:
+<pre><code>terraform {
+  backend "s3" {
+    bucket       = "&lt;your-github-username&gt;-lab3-state"
+    key          = "dev/terraform.tfstate"
+    region       = "ap-south-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}</code></pre>
+Then, from <code>envs/dev</code>:
+<pre><code>terraform init -migrate-state</code></pre>
+Terraform asks whether to copy the existing state to the new backend. Type <code>yes</code>. In the console, your bucket now has <code>dev/terraform.tfstate</code>.</li>
+<li>Repeat Trap 1. Delete the local state file, if it is still there, and plan:
+<pre><code>rm -f terraform.tfstate terraform.tfstate.backup
+terraform plan</code></pre>
+<b>No changes.</b> The laptop's copy is gone, but the state lives in S3, so Terraform still knows about everything it created.</li>
+<li>See the lock. Open a second terminal in <code>envs/dev</code>. In the first, run <code>terraform apply</code> and leave it waiting at the <code>yes</code> prompt. In the second, run <code>terraform plan</code>. It fails with <code>Error acquiring the state lock</code>, because the first terminal is holding the lock. Answer <code>no</code> in the first terminal, and the lock is released.</li>
+</ol>
+<p>Add a section to your README with the drift plan and the lock error, then commit <code>aws/main.tf</code>, its <code>.terraform.lock.hcl</code> and <code>envs/dev/backend.tf</code>.</p>
+<p class="aside"><b>Go further: a registry.</b> Add an <code>aws_ecr_repository</code> named <code>hello</code> to <code>aws/main.tf</code>, with <code>name = "hello-app"</code> and <code>force_delete = true</code>, plus an output <code>registry_url</code> with the value <code>aws_ecr_repository.hello.repository_url</code>. Apply. Then push the v2 image there, reading the address from the output instead of copying it:
+<code>aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin $(terraform output -raw registry_url | cut -d/ -f1)</code>, then <code>docker pull shripada/hello-app:v2</code>, <code>docker tag shripada/hello-app:v2 $(terraform output -raw registry_url):v2</code> and <code>docker push $(terraform output -raw registry_url):v2</code>. The image now shows up under <b>ECR</b> in the console.</p>
+<p><b>Clean up, in this order:</b></p>
+<ol class="steps">
+<li>Delete dev. Its state is in S3, so run this from <code>envs/dev</code> while the bucket still exists:
+<pre><code>terraform destroy</code></pre></li>
+<li>Delete the bucket (and the registry, if you made one), from <code>aws</code>:
+<pre><code>terraform destroy</code></pre></li>
+<li>Delete <code>envs/dev/backend.tf</code> and commit, because the bucket it points to no longer exists. In the console, check that <b>S3</b> and <b>ECR</b> are empty, then check <b>Billing</b>.</li>
+</ol>
+
+<nav class="course"><a href="../index.html">← Course home</a><a href="lab-2-kubernetes.html">← Lab 2</a></nav>
+</main><script src="../assets/quiz.js"></script></body></html>
