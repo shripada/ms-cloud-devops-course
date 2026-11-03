@@ -154,8 +154,13 @@ terraform output -raw url</code></pre>
 Type <code>yes</code>. Apply waits until all three Pods are ready before it says <b>Apply complete!</b>, so the first run can take half a minute while the nodes pull the image. Paste the output value into your README.</li>
 <li>Open <a href="http://localhost:8080">http://localhost:8080</a>. The table fills with three Pod names, the same names <code>kubectl get pods</code> shows.</li>
 <li><b>Predict first:</b> what happens if you run <code>terraform apply</code> again without changing anything? Run it and check.</li>
+<li>Commit your code. Check what Git will commit first:
+<pre><code>git add .
+git status</code></pre>
+You should see <code>main.tf</code>, <code>.terraform.lock.hcl</code> and <code>README.md</code>. The lock file records the exact provider version, so everyone who clones your repository gets the same one. If <code>terraform.tfstate</code> is listed, stop: your <code>.gitignore</code> is missing or broken.
+<pre><code>git commit -m "Run hello-app v1 with Terraform"</code></pre></li>
 </ol>
-<div class="checkpoint"><b>Checkpoint:</b> the page shows three Pod names, and a second <code>terraform apply</code> says <b>No changes</b>.</div>
+<div class="checkpoint"><b>Checkpoint:</b> the page shows three Pod names, a second <code>terraform apply</code> says <b>No changes</b>, and your code is committed.</div>
 
 <h2 id="b3"><span class="lab-time">0:50–1:05</span> Part 2: update the image</h2>
 <p>Keep the browser tab open on <a href="http://localhost:8080">http://localhost:8080</a>.</p>
@@ -168,8 +173,13 @@ Look for <code>~ update in-place</code>, the line <code>image = "shripada/hello-
 <pre><code>terraform apply
 kubectl get rs</code></pre>
 New Pod names join the table one by one as the Deployment rolls out the new Pods and removes the old ones. The page you have open is still the old one, so refresh it: the heading now ends in <b>v2</b> and the highlights are green. <code>kubectl get rs</code> shows the old ReplicaSet with 0 Pods and the new one with 3. It is the same rolling update you saw in lesson 13, started from a file.</li>
+<li>Commit the change:
+<pre><code>git add .
+git commit -m "Update hello-app to v2"
+git log --oneline</code></pre>
+Every change to your app is now one commit. To see what changed and when, read the log.</li>
 </ol>
-<div class="checkpoint"><b>Checkpoint:</b> after a refresh, the page says v2, and <code>terraform apply</code> says <b>No changes</b>.</div>
+<div class="checkpoint"><b>Checkpoint:</b> after a refresh, the page says v2, <code>terraform apply</code> says <b>No changes</b>, and <code>git log --oneline</code> shows two commits.</div>
 
 <h2 id="b4"><span class="lab-time">1:15–1:35</span> Part 3: catch changes made by hand</h2>
 <p>Once Terraform manages the app, every change should go through the code. But nothing stops anyone from running <code>kubectl</code> by hand, and in real teams someone always does. Your teammate needs more Pods for a demo and runs one quick command instead of changing the code. Play the teammate.</p>
@@ -236,11 +246,17 @@ Two <code>hello-app</code> Services, one in <code>dev</code> on 8080 and one in 
 <pre><code>cd ../dev
 terraform plan</code></pre>
 Every resource says <code># forces replacement</code>, and the plan is <code>3 to add, 0 to change, 3 to destroy</code>. An object can't move to another namespace, so Terraform must delete it and create a new one. Don't apply it. Change the name back to <code>"dev"</code>. Reading the plan before you type <code>yes</code> is what saves prod.</li>
+<li>Go back to the repository root and commit the new layout:
+<pre><code>cd ../..
+git add .
+git status
+git commit -m "Split hello-app into a module with dev and prod"</code></pre>
+<code>git status</code> shows the root <code>main.tf</code> and <code>.terraform.lock.hcl</code> as deleted, and the three new <code>main.tf</code> files and two lock files as new. No <code>terraform.tfstate</code> file should be listed.</li>
 </ol>
-<div class="checkpoint"><b>Checkpoint:</b> both pages work, and <code>terraform plan</code> says <b>No changes</b> in both <code>envs/dev</code> and <code>envs/prod</code>.</div>
+<div class="checkpoint"><b>Checkpoint:</b> both pages work, <code>terraform plan</code> says <b>No changes</b> in both <code>envs/dev</code> and <code>envs/prod</code>, and the new layout is committed.</div>
 
 <h2 id="b6"><span class="lab-time">2:05–2:20</span> Break it on purpose</h2>
-<p>Work in <code>envs/dev</code>. Keep both browser tabs open.</p>
+<p>Move into <code>envs/dev</code> with <code>cd envs/dev</code> and work there. Keep both browser tabs open.</p>
 <div class="trap"><b>Trap 1 — the lost state file.</b> Your laptop's disk "fails", and only the state file is lost. In <code>envs/dev</code>:
 <pre><code>rm terraform.tfstate
 terraform plan</code></pre>
@@ -261,10 +277,11 @@ The EndpointSlice is empty, the same as Lab 2's trap 2. Terraform checks that th
 <li>From the repository root, stage everything and check what Git will commit:
 <pre><code>git add .
 git status</code></pre>
-You should see the three <code>main.tf</code> files, the two <code>.terraform.lock.hcl</code> files, <code>README.md</code> and <code>screenshot.png</code>. If any <code>terraform.tfstate</code> file is listed, stop: your <code>.gitignore</code> is missing or broken.</li>
+You should see only <code>README.md</code> and <code>screenshot.png</code>: your Terraform code is already committed. If a <code>main.tf</code> is listed, the Trap 2 typo is still in it, so fix it first. If any <code>terraform.tfstate</code> file is listed, stop: your <code>.gitignore</code> is missing or broken.</li>
 <li>Commit and push, then check the files on GitHub:
 <pre><code>git commit -m "Lab 3 submission"
-git push</code></pre></li>
+git push</code></pre>
+On GitHub, open the commit history. You should see one commit for each change to the code.</li>
 <li>Delete both environments:
 <pre><code>cd envs/prod &amp;&amp; terraform destroy
 cd ../dev    &amp;&amp; terraform destroy
@@ -307,6 +324,7 @@ No <code>dev</code> or <code>prod</code> namespace is left. Skip this step if yo
 <li>Leaving Lab 2's Service on port 8080, so the new Service's port clashes with it.</li>
 <li>Changing an object with <code>kubectl</code> and being surprised when the next apply undoes it.</li>
 <li>Committing a <code>terraform.tfstate</code> file. Always run <code>git status</code> before you commit.</li>
+<li>Changing <code>main.tf</code> and applying it without committing. If the change isn't in Git, nobody else on the team can see it.</li>
 </ul>
 
 <h2 id="b8"><span class="lab-time">Take-home</span> Optional: move your state to AWS</h2>
