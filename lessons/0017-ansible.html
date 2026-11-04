@@ -3,15 +3,40 @@
 <div class="kicker"><a href="../index.html">Course home</a> · Module 3 · Lesson 17</div>
 <h1>Configuration management with Ansible</h1>
 
-<div class="box"><b>One-hour class path.</b> Start with the 10-minute scenario below. Use the Kubernetes and Vault exercise (steps 11–17) as the 30-minute core demo, spend 15 minutes on the “spot the problems” drill, and finish with exit question 5. The three-container exercise is an optional warm-up that the instructor can pre-stage; the other questions are homework.</div>
+<div class="box"><b>One-hour class path.</b> Start with the scenario below (5 minutes), then “Why Terraform is not enough” and “How Ansible works” (15 minutes). The three-server exercise (steps 1–10) is the 22-minute core demo. Spend 10 minutes on the “spot the problems” drill and finish with exit question 5. The Kubernetes and Vault exercise (steps 11–16) and the other questions are homework.</div>
 
 <div class="practice-q recall">
-<p class="meta">Opening scenario · 10 minutes</p>
-<p>A team must deploy the same app to dev and prod Kubernetes environments with different replica counts and image tags. The database password must not be readable in Git, and running the deployment again must be safe. Choose a tool and explain how inventory, variables, idempotent tasks and encrypted secrets solve the problem; exact syntax is not required.</p>
+<p class="meta">Opening scenario · 5 minutes</p>
+<p>A Bengaluru startup runs a food-delivery app. Forty developers push code all day, and every push is built and tested on the company's CI build servers. The week before the Diwali sale, each build waits 30 minutes in the queue, so the DevOps team uses Terraform to add 8 build servers and 2 staging servers on AWS. Each server now needs a <code>deploy</code> user, an <code>/opt/app</code> folder and a settings file: build servers allow 4 jobs at a time, staging servers 1. An engineer logs in to each one over SSH and types the commands. Server 7 ends up with <code>MAX_JOBS=40</code> by mistake, running the setup script again fails with “user already exists”, and five more servers arrive next month. Terraform made these servers: why can't it also set them up, and what would you use instead?</p>
 </div>
 
 <h2>Why this matters for DevOps</h2>
 <p>Terraform gave you machines and a cluster. Now something has to happen <em>on</em> them: create a user, install a package, write a config file, deploy an app with the right settings for dev or prod. Doing it by SSH-ing into each machine works for two machines. With twenty CI runners, someone forgets one, or types a different value on one, and now “it fails only on runner 7”. Configuration management means writing the desired setup once and applying it to every machine, as many times as you like, with the same result.</p>
+
+<h2>Why Terraform is not enough</h2>
+<p>Terraform manages things through a cloud's API: it asks AWS for a server of a certain size, with a disk and a network. Everything <em>inside</em> the server (users, folders, files, packages) is not a cloud resource, so Terraform has nothing to create, check or fix there. Terraform can run a script once when a server is created (a <em>provisioner</em>), but HashiCorp calls provisioners a last resort: the script never runs again, and Terraform can't see if someone later changes the server by hand. <a href="https://developer.hashicorp.com/terraform/language/resources/provisioners/syntax">[Terraform docs: Provisioners]</a> Writing the setup of servers as code, and applying it again whenever you like, is called <em>configuration management</em>. Ansible is the most widely used tool for it. In container-based teams, Ansible mainly sets up the servers and network devices (routers, switches) that Kubernetes runs on. It can also apply Kubernetes objects such as Deployments; see “Going further” below.</p>
+
+<h2>How Ansible works</h2>
+<table>
+<caption>The words Ansible uses</caption>
+<tr><th scope="col">Word</th><th scope="col">Meaning</th><th scope="col">For the food-delivery startup</th></tr>
+<tr><th scope="row">Control machine</th><td>Where Ansible is installed and run</td><td>The engineer's laptop, or a CI job</td></tr>
+<tr><th scope="row">Managed hosts</th><td>The servers being set up</td><td>The 8 build servers and 2 staging servers</td></tr>
+<tr><th scope="row">Inventory</th><td>A file listing the hosts, in groups</td><td>The 8 build servers in a group called <code>runners</code>, the 2 staging servers in a group called <code>staging</code></td></tr>
+<tr><th scope="row">Module</th><td>A small program that makes one thing true</td><td>The <code>user</code> module: makes sure a user exists. Others: <code>file</code> for folders, <code>copy</code> for file contents</td></tr>
+<tr><th scope="row">Task</th><td>One use of a module, with its values</td><td>Use the <code>user</code> module to make sure user <code>deploy</code> exists</td></tr>
+<tr><th scope="row">Playbook</th><td>A YAML file: which hosts, which tasks, in order</td><td><code>setup.yml</code>: on all 10 servers, create user <code>deploy</code>, then the folder <code>/opt/app</code>, then the settings file</td></tr>
+</table>
+<p>One run of <code>ansible-playbook</code> goes like this:</p>
+<ol>
+<li>Read the inventory: which hosts.</li>
+<li>Read the playbook: which tasks, in order.</li>
+<li>For each task, on every host: connect over SSH, copy the module, run it.</li>
+<li>The module checks first. If the host is already right, it reports <code>ok</code>. If not, it fixes it and reports <code>changed</code>.</li>
+<li>Delete the module and go to the next task.</li>
+<li>Print a recap: how many <code>ok</code> and <code>changed</code> for each host.</li>
+</ol>
+<p><a href="https://docs.ansible.com/ansible/latest/getting_started/basic_concepts.html">[Ansible docs: Concepts]</a> The three ideas below explain why this works well.</p>
 
 <h2>Three ideas, no more</h2>
 <p><b>Agentless, with an inventory</b>: Ansible runs on one <em>control machine</em> (your laptop, or a CI job). It connects to each target over SSH, copies a small Python program, runs it, and deletes it. Nothing has to be installed or kept running on the targets, apart from SSH and Python. (Chef and Puppet need an agent on every machine.) The <em>inventory</em> is a file listing the targets, in groups like <code>runners</code> and <code>staging</code>, so a playbook can target one group. <a href="https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html">[Ansible docs: Inventory]</a></p>
@@ -23,10 +48,11 @@
 <caption>Terraform and Ansible have different main jobs</caption>
 <tr><th scope="col">Comparison</th><th scope="col">Terraform</th><th scope="col">Ansible</th></tr>
 <tr><th scope="row">Main job</th><td>Create and delete infrastructure: networks, clusters, VMs, buckets</td><td>Configure what's on existing machines, and deploy apps</td></tr>
+<tr><th scope="row">Talks to</th><td>Cloud APIs</td><td>Each server, usually over SSH</td></tr>
 <tr><th scope="row">How it knows what exists</th><td>A state file</td><td>No state: checks each machine every run</td></tr>
 <tr><th scope="row">Typical order</th><td>First: make the cluster and runners</td><td>Then: set up the runners, deploy to the cluster</td></tr>
 </table>
-<p>They overlap a little (Ansible can create cloud resources, Terraform can run scripts), but this split is what most teams use.</p>
+<p>They overlap a little (Ansible can create cloud resources, Terraform can run scripts once), but this split is what most teams use.</p>
 
 <h2>Before you start</h2>
 <p>Docker Desktop running, with your 3-node cluster. Ansible's control machine must be macOS or Linux; on Windows, use WSL2 (Ubuntu) and run everything there. Install Ansible plus the Python library its Kubernetes module needs, in a virtual environment:</p>
@@ -35,13 +61,13 @@ uv venv -p 3.13 ~/ansible-env
 source ~/ansible-env/bin/activate
 uv pip install ansible kubernetes
 ansible --version</code></pre>
-<p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal. Make a folder, <code>config-demo</code>, and work in it.</p>
-<p><b>Optional warm-up; pre-stage this for a one-hour class.</b> We need some machines to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. The inventory, variables, modules and idempotence behave the same way; the exercise does not cover real-server concerns such as SSH keys and host verification, privilege escalation, service managers or OS package differences.</p>
+<p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal. (The <code>kubernetes</code> library is needed only for the Kubernetes exercise.) Make a folder, <code>config-demo</code>, and work in it.</p>
+<p>We need some servers to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. The inventory, variables, modules and idempotence behave the same way; the exercise does not cover real-server concerns such as SSH keys and host verification, privilege escalation, service managers or OS package differences.</p>
 <pre><code>for h in runner1 runner2 stage1; do
   docker run -d --name $h python:3.13-slim sleep infinity
 done</code></pre>
 
-<h2>Optional warm-up: one playbook, three containers</h2>
+<h2>Core exercise: one playbook, three servers</h2>
 <ol class="steps">
 <li>Write the inventory, <code>inventory.ini</code>:
 <pre><code>[runners]
@@ -99,7 +125,7 @@ The recap shows <code>ok=4 changed=3</code> for each host. (The fourth task is �
 <code>changed=0</code> everywhere. Each module checked, found the machine already right, and did nothing. A shell script with <code>useradd deploy</code> would fail on the second run with “user already exists”.</li>
 </ol>
 
-<h2>Optional warm-up continued: drift, limits and a new container</h2>
+<h2>Core exercise continued: drift, limits and a new server</h2>
 <ol class="steps" start="7">
 <li>Someone edits a file by hand on one runner:
 <pre><code>docker exec runner2 sh -c 'echo MAX_JOBS=99 &gt;&gt; /opt/app/settings.env'
@@ -112,7 +138,8 @@ Only <code>stage1</code> runs. The runners aren't touched, even though the playb
 <li>Clean up the stand-in machines: <code>docker rm -f runner1 runner2 runner3 stage1</code>.</li>
 </ol>
 
-<h2>Core demo (30 minutes): deploy to Kubernetes, with a secret</h2>
+<h2>Going further: deploy to Kubernetes, with a secret</h2>
+<p>Ansible can also deploy apps to a Kubernetes cluster, but it is not always the best choice. For Kubernetes objects alone, <code>kubectl apply</code> (lesson 11) and Terraform's Kubernetes provider also re-run safely. Ansible makes sense when one playbook already sets up your servers and should deploy the app too, or when a password must stay encrypted in Git: Terraform keeps every value, passwords included, in its state file in plain text.</p>
 <p>Ansible doesn't need SSH for this part. The <code>kubernetes.core.k8s</code> module talks straight to the cluster's API, using your kubeconfig, the same way kubectl does. So the “target” is your own laptop (<code>ansible_connection=local</code>), and nothing is installed on the cluster. We'll pretend two namespaces are two clusters, dev and prod.</p>
 <ol class="steps" start="11">
 <li>Create <code>clusters.ini</code>:
@@ -173,10 +200,12 @@ The file now starts with <code>$ANSIBLE_VAULT;1.1;AES256</code> followed by numb
           spec:
             replicas: "{{ replicas }}"
             selector:
-              matchLabels: { app: api }
+              matchLabels:
+                app: api
             template:
               metadata:
-                labels: { app: api }
+                labels:
+                  app: api
               spec:
                 containers:
                   - name: api
@@ -317,10 +346,10 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <div class="fb"></div></div>
 
 <div class="quiz recall">
-<p class="q">5. Exit question · 5 minutes: “You must deploy the same app to three Kubernetes clusters, each with a different replica count and image tag, and a database password that must not be readable in Git. Re-running must be safe. Which tool, and how?”</p>
+<p class="q">5. Exit question · 5 minutes: “Your team sets up 20 build servers by hand over SSH. Explain how Ansible would do it: what files you write, how each group of servers gets its own job limit, and why running it twice is safe.”</p>
 <textarea aria-label="Answer to Ansible exit question" placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
-<p>Ansible, with the <code>kubernetes.core.k8s</code> module and Ansible Vault. It's agentless: it runs from one control machine, a laptop or a CI job, and talks to each cluster's API through a kubeconfig context, so nothing is installed on the clusters. The inventory lists the three clusters, each with its own variables (context, replica count, image tag); one playbook inserts those values into the Deployment manifest by templating, so all three use the same definition. The password is in a variables file encrypted with Ansible Vault (AES-256), so it can be committed; the playbook decrypts it at run time when given the vault password, which comes from the CI secret store, and creates a Kubernetes Secret with <code>no_log</code> so it isn't printed. Re-running is safe because each task declares the desired state: the module compares it with the cluster and reports <code>ok</code> if it already matches or <code>changed</code> if it fixed something, so a second run changes nothing, and a run after someone scaled a Deployment by hand puts back only that one.</p></details>
+<p>Ansible, run from one control machine (a laptop or a CI job). An <b>inventory</b> file lists the 20 servers in groups, for example <code>[runners]</code> and <code>[staging]</code>; a new server is one more line. A <b>playbook</b> lists tasks in order, and each task uses a <b>module</b> that states a result, not a command: “user <code>deploy</code> exists”, “<code>/opt/app</code> is a folder”, “<code>settings.env</code> has this content”. The job limit is a variable, <code>max_jobs</code>, set once per group in <code>group_vars/runners.yml</code> (4) and <code>group_vars/staging.yml</code> (1); the settings file uses <code>{{ max_jobs }}</code>, so a typo on one server can't happen. Ansible connects over SSH and needs only SSH and Python on the servers, no agent. Running it twice is safe because each module checks first: if the server already matches, it reports <code>ok</code> and does nothing; otherwise it fixes it and reports <code>changed</code>. A second run shows <code>changed=0</code>, and a <code>changed</code> on a later run shows which server someone edited by hand.</p></details>
 </div>
 
 <h2>Read next</h2>

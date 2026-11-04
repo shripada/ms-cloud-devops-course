@@ -168,3 +168,4 @@ html,body,.reveal-viewport{background:var(--bg);color:var(--fg)}
 .d text.huge{font-family:"JetBrains Mono",monospace;font-size:64px;font-weight:600;fill:var(--accent)}
 .d .axis{stroke:var(--line);stroke-width:3}
 .d .tick{stroke:var(--line);stroke-width:2}
+.reveal pre.yaml.small code.hljs{font-size:16px;line-height:1.22}

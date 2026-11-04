@@ -25,59 +25,81 @@ Envoy Gateway is the control plane: it watches Gateway API objects and creates o
 <li>Declare both applications, both internal Services and the complete routing configuration in <code>shop.yaml</code>:
 <pre><code>apiVersion: apps/v1
 kind: Deployment
-metadata: { name: web }
+metadata:
+  name: web
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: web }
+    matchLabels:
+      app: web
   template:
     metadata:
-      labels: { app: web }
+      labels:
+        app: web
     spec:
       containers:
         - name: whoami
           image: traefik/whoami:v1.11
-          ports: [{ name: http, containerPort: 80 }]
+          ports:
+            - name: http
+              containerPort: 80
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: web }
+metadata:
+  name: web
 spec:
-  selector: { app: web }
-  ports: [{ name: http, port: 80, targetPort: http }]
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
-metadata: { name: api }
+metadata:
+  name: api
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: api }
+    matchLabels:
+      app: api
   template:
     metadata:
-      labels: { app: api }
+      labels:
+        app: api
     spec:
       containers:
         - name: whoami
           image: traefik/whoami:v1.11
-          ports: [{ name: http, containerPort: 80 }]
+          ports:
+            - name: http
+              containerPort: 80
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: api }
+metadata:
+  name: api
 spec:
-  selector: { app: api }
-  ports: [{ name: http, port: 80, targetPort: http }]
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
-metadata: { name: eg }
+metadata:
+  name: eg
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
-metadata: { name: shop }
+metadata:
+  name: shop
 spec:
   gatewayClassName: eg
   listeners:
@@ -85,24 +107,33 @@ spec:
       protocol: HTTP
       port: 80
       allowedRoutes:
-        namespaces: { from: Same }
+        namespaces:
+          from: Same
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
-metadata: { name: shop }
+metadata:
+  name: shop
 spec:
   parentRefs:
     - name: shop
-  hostnames: [shop.example.com]
+  hostnames:
+    - shop.example.com
   rules:
     - matches:
-        - path: { type: PathPrefix, value: /api }
+        - path:
+            type: PathPrefix
+            value: /api
       backendRefs:
-        - { name: api, port: 80 }
+        - name: api
+          port: 80
     - matches:
-        - path: { type: PathPrefix, value: / }
+        - path:
+            type: PathPrefix
+            value: /
       backendRefs:
-        - { name: web, port: 80 }</code></pre>
+        - name: web
+          port: 80</code></pre>
 The application Services omit <code>type</code>, so they are ClusterIP Services. Only Envoy's entry-point Service needs external exposure. This lab keeps every object together so you can see the complete system. At work, a platform team commonly owns the <code>GatewayClass</code> and shared <code>Gateway</code>, while application teams own their Deployments, Services and HTTPRoutes.</li>
 <li>Apply the one file and inspect both desired and observed state:
 <pre><code>kubectl apply -f shop.yaml
@@ -163,15 +194,19 @@ metadata:
 spec:
   replicas: 5
   selector:
-    matchLabels: { app: front }
+    matchLabels:
+      app: front
   template:
     metadata:
-      labels: { app: front }
+      labels:
+        app: front
     spec:
       containers:
         - name: front
           image: traefik/whoami:v1.11
-          ports: [{ name: http, containerPort: 80 }]
+          ports:
+            - name: http
+              containerPort: 80
 ---
 apiVersion: v1
 kind: Service
@@ -179,8 +214,12 @@ metadata:
   name: front
   namespace: testing
 spec:
-  selector: { app: front }
-  ports: [{ name: http, port: 80, targetPort: http }]</code></pre>
+  selector:
+    app: front
+  ports:
+    - name: http
+      port: 80
+      targetPort: http</code></pre>
 <b>Predict first:</b> how many Pods start? Apply the complete desired state:
 <pre><code>kubectl apply -f testing.yaml
 kubectl get pods -n testing
@@ -240,17 +279,28 @@ Read it piece by piece: <code>0/3 nodes are available: 1 node(s) had untolerated
 <div class="trap"><b>Drill: spot the problems.</b> This HTTPRoute should attach to the <code>fest</code> Gateway, send everything for <code>fest.example.com</code> to the <code>site</code> Service, and send everything under <code>/tickets</code> to the <code>tickets</code> Service. Both Services listen on port 80. Find three errors.
 <pre><code>apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
-metadata: { name: fest }
+metadata:
+  name: fest
 spec:
-  parentRefs: [{ name: missing }]
-  hostnames: [fest.example.com]
+  parentRefs:
+    - name: missing
+  hostnames:
+    - fest.example.com
   rules:
     - matches:
-        - path: { type: Exact, value: /tickets }
-      backendRefs: [{ name: tickets, port: 80 }]
+        - path:
+            type: Exact
+            value: /tickets
+      backendRefs:
+        - name: tickets
+          port: 80
     - matches:
-        - path: { type: PathPrefix, value: / }
-      backendRefs: [{ name: fest-site, port: 8080 }]</code></pre>
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: fest-site
+          port: 8080</code></pre>
 <details><summary>Show the answer</summary>
 <p>1. <b>Wrong parent</b>: <code>parentRefs</code> names <code>missing</code>, so this route does not attach to the <code>fest</code> Gateway. Use <code>name: fest</code>. 2. <b><code>type: Exact</code> on <code>/tickets</code></b>: <code>/tickets/123</code> does not match and falls through to the <code>/</code> rule. Use <code>PathPrefix</code>. 3. <b>The <code>/</code> backend is wrong</b>: the Service is called <code>site</code>, not <code>fest-site</code>, and it listens on 80, not 8080. Fix both the name and port. <code>kubectl describe httproute fest</code> and its status conditions help distinguish attachment and backend-reference failures.</p></details>
 </div>
@@ -262,17 +312,28 @@ spec:
 <p>The HTTPRoute below should attach to the <code>food</code> Gateway, send every request for <code>food.example.com</code> to the <code>frontend</code> Service, and send requests under <code>/api</code> to the <code>orders-api</code> Service. Both Services listen on port 80.</p>
 <pre><code>apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
-metadata: { name: food }
+metadata:
+  name: food
 spec:
-  parentRefs: [{ name: shop }]
-  hostnames: [food.example.com]
+  parentRefs:
+    - name: shop
+  hostnames:
+    - food.example.com
   rules:
     - matches:
-        - path: { type: PathPrefix, value: / }
-      backendRefs: [{ name: frontend, port: 80 }]
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend
+          port: 80
     - matches:
-        - path: { type: Exact, value: /api }
-      backendRefs: [{ name: orders, port: 80 }]</code></pre>
+        - path:
+            type: Exact
+            value: /api
+      backendRefs:
+        - name: orders
+          port: 80</code></pre>
 <ol class="asks">
 <li><span class="am">[3]</span>Detect any three errors, and state how to fix each.</li>
 <li><span class="am">[2]</span>Analyze why one shared Gateway is cheaper and simpler than giving each application Service its own cloud load balancer.</li>

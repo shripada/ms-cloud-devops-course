@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ansible in Four Minutes</title>
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="deck.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="reveal"><div class="slides">
+
+<!-- ============ Title ============ -->
+<section class="title">
+  <div class="kicker">Ansible</div>
+  <h1>Ansible in four minutes</h1>
+  <p class="sub">Change 128 servers the way you change one</p>
+  <aside class="notes">
+    Based only on the video "Ansible Explained in 4 Minutes" by Tech With Diego: https://www.youtube.com/watch?v=SuUnLqWpnEM
+    Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
+  </aside>
+</section>
+
+<section>
+  <div class="kicker">Scenario</div>
+  <h2>One firewall rule</h2>
+  <p class="lead">You are at your desk. Your manager messages you: “Can you update a firewall rule on one of the servers?”</p>
+  <ul class="lead">
+    <li class="fragment">You log in, make the change, test it</li>
+    <li class="fragment">You reply: “All good, change applied”</li>
+    <li class="fragment">Manager: “Perfect. Now do it on the other 127 servers.”</li>
+  </ul>
+  <p class="take fragment">One or two servers by hand is fine. As the number grows, it becomes impossible.</p>
+  <aside class="notes">Ask: how long would 127 logins take? What are the chances every one is typed the same way?</aside>
+</section>
+
+<section>
+  <h2>What Ansible is</h2>
+  <p class="lead">An open-source automation tool that manages and sets up servers at scale.</p>
+  <p class="lead fragment">You describe the tasks for each server in simple, readable files called <b>playbooks</b>.</p>
+  <div class="a fragment">Ansible is built around three things: <b>inventory</b>, <b>playbooks</b> and <b>modules</b>.</div>
+</section>
+
+<!-- ============ The three pieces ============ -->
+<section class="divider">
+  <h2>The three pieces</h2>
+  <p>Inventory, playbook, module</p>
+</section>
+
+<section>
+  <h2>Inventory: which servers</h2>
+  <div class="cols wide-left">
+<pre class="yaml big"><code class="language-ini" data-trim data-line-numbers="1|2-3" data-fragment-index="0">
+[webservers]
+192.168.1.10
+192.168.1.11
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0"><h3>The inventory file</h3><p>A list of servers, in groups.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>Group <code>webservers</code></h3><p>A name for a set of servers.</p></div>
+      <div class="step fragment" data-fragment-index="1"><h3>Two servers</h3><p>VMs, cloud instances, anything you can reach over SSH.</p></div>
+    </div>
+  </div>
+  <p class="take fragment">Now when you say <code>webservers</code>, Ansible knows you mean these two machines.</p>
+</section>
+
+<section>
+  <h2>Playbook: what to do</h2>
+  <div class="cols wide-left">
+<pre class="yaml"><code class="language-yaml" data-trim data-line-numbers="1-8|1|2|3-8|4-8" data-fragment-index="0">
+- hosts: webservers
+  become: yes
+  tasks:
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+</code></pre>
+    <div class="stack">
+      <div class="step fragment fade-out" data-fragment-index="0"><h3>The playbook</h3><p>A YAML file. Read it top to bottom.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>hosts</h3><p>Which group to target. Ansible looks up <code>webservers</code> in the inventory.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="1"><h3>become</h3><p>Changing the firewall needs sudo. This says “become root” for the tasks.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="2"><h3>tasks</h3><p>The task list: where the real work happens. Here, just one task.</p></div>
+      <div class="step fragment" data-fragment-index="3"><h3>The task</h3><p>Accept TCP connections on port 443: open HTTPS in the firewall, using the <code>ufw</code> module.</p></div>
+    </div>
+  </div>
+  <aside class="notes">ufw is the firewall on Ubuntu.</aside>
+</section>
+
+<section>
+  <h2>Module: a mini tool that does the job</h2>
+  <p class="lead">Ansible has modules for almost everything:</p>
+  <div class="cols">
+    <ul class="lead">
+      <li class="fragment">users</li>
+      <li class="fragment">files</li>
+      <li class="fragment">packages</li>
+      <li class="fragment">services</li>
+    </ul>
+    <ul class="lead">
+      <li class="fragment">cloud providers</li>
+      <li class="fragment">Docker</li>
+      <li class="fragment">Kubernetes</li>
+    </ul>
+  </div>
+  <p class="take fragment">The <code>ufw</code> module manages the firewall on Ubuntu.</p>
+</section>
+
+<section>
+  <h2>Describe the result, not the command</h2>
+  <div class="cols">
+    <div class="card bad">
+      <h3>By hand: the command</h3>
+<pre class="term small"><span class="cmd">sudo ufw allow 443/tcp</span></pre>
+      <p>You must know and type the exact command, on each machine.</p>
+    </div>
+    <div class="card good fragment">
+      <h3>With a module: the goal</h3>
+<pre class="term small"><span class="out">rule: allow</span>
+<span class="out">port: "443"</span>
+<span class="out">proto: tcp</span></pre>
+      <p>You say what you want. The module works out how to get there.</p>
+    </div>
+  </div>
+  <p class="take fragment">A few lines of YAML, written once: your first automation as infrastructure as code.</p>
+</section>
+
+<!-- ============ Features ============ -->
+<section class="divider">
+  <h2>Three features</h2>
+  <p>Agentless, idempotent, check mode</p>
+</section>
+
+<section>
+  <h2>1. Agentless</h2>
+  <svg class="d" viewBox="0 0 1170 400" role="img" aria-label="The control node connects over SSH to three servers, runs the tasks and disconnects. Nothing is installed on the servers">
+    <rect class="cp" x="20" y="140" width="320" height="120" rx="14"/>
+    <text class="b" x="50" y="192">Control node</text>
+    <text class="s" x="50" y="228">runs Ansible</text>
+    <g class="fragment">
+      <path class="arrow acc" d="M342,200 L770,70"/>
+      <path class="arrow acc" d="M342,200 L770,200"/>
+      <path class="arrow acc" d="M342,200 L770,330"/>
+      <text class="m" x="520" y="180">SSH</text>
+      <rect class="pod" x="785" y="30" width="360" height="80" rx="10"/>
+      <text class="b" x="815" y="80">server 1</text>
+      <rect class="pod" x="785" y="160" width="360" height="80" rx="10"/>
+      <text class="b" x="815" y="210">server 2</text>
+      <rect class="pod" x="785" y="290" width="360" height="80" rx="10"/>
+      <text class="b" x="815" y="340">server 3</text>
+    </g>
+  </svg>
+  <p class="take fragment">Nothing to install on the target servers. Ansible connects over SSH, runs the tasks and disconnects.</p>
+</section>
+
+<section>
+  <h2>2. Idempotent</h2>
+  <ol class="lead">
+    <li>Check the current setup on the server</li>
+    <li class="fragment">Compare it with what the playbook asks for</li>
+    <li class="fragment">Change it only if something is actually different</li>
+  </ol>
+  <div class="a fragment">Run the same playbook 10 times on the same server: nothing breaks, and the same change is not applied again and again.</div>
+</section>
+
+<section>
+  <h2>3. Check mode</h2>
+  <p class="lead">Simulate the changes without actually applying them.</p>
+<pre class="term fragment"><span class="cmd">ansible-playbook -i inventory.ini playbook.yml --check</span></pre>
+  <p class="take fragment">Preview everything before it runs on 128 servers.</p>
+</section>
+
+<!-- ============ Summary ============ -->
+<section>
+  <h2>Summary</h2>
+  <table>
+    <tr><th>Piece</th><th>What it does</th></tr>
+    <tr><td><b>Inventory</b></td><td>Lists your servers, in groups</td></tr>
+    <tr class="fragment"><td><b>Playbook</b></td><td>Lists the tasks to run, in YAML</td></tr>
+    <tr class="fragment"><td><b>Module</b></td><td>Carries out each task: you describe the goal</td></tr>
+    <tr class="fragment"><td><b>Agentless</b></td><td>Connects over SSH; nothing installed on servers</td></tr>
+    <tr class="fragment"><td><b>Idempotent</b></td><td>Nothing changes unless it needs to</td></tr>
+    <tr class="fragment"><td><b>Check mode</b></td><td>Preview before it runs</td></tr>
+  </table>
+  <p class="take fragment">Ansible turns manual work into automation that scales.</p>
+</section>
+
+<section>
+  <h2>Check yourself</h2>
+  <ol class="lead">
+    <li>Which file tells Ansible what <code>webservers</code> means?</li>
+    <li class="fragment">Why does the firewall playbook need <code>become: yes</code>?</li>
+    <li class="fragment">You run the playbook a second time. Port 443 is already open. What does Ansible do?</li>
+    <li class="fragment">What must you install on the 128 servers before Ansible can manage them?</li>
+  </ol>
+  <aside class="notes">Answers: 1. The inventory. 2. Changing the firewall needs root (sudo). 3. It checks, finds the rule already there, changes nothing. 4. Nothing from Ansible: it only needs SSH access.</aside>
+</section>
+
+</div></div>
+
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="vendor/reveal/plugin/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    center: false,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    plugins: [RevealNotes, RevealHighlight],
+    keyboard: {
+      84: function () {
+        var btn = document.querySelector('.theme-toggle');
+        if (btn) btn.click();
+      }
+    }
+  });
+</script>
+</body>
+</html>

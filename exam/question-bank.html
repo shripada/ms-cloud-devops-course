@@ -287,40 +287,41 @@ CMD ["node", "build/index.js"]</code></pre>
 <p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
 </div>
 <div class="quiz">
-<p class="q">Q6. Services and Ingress <span class="tag">(10 marks · CO2 · PO4)</span></p>
+<p class="q">Q6. Services and Gateway API <span class="tag">(10 marks · CO2 · PO4)</span></p>
 <p><b>(a)</b> In the online bookstore, the React frontend must be reachable from the internet, the API is used by the frontend, and the database is used only by the API.</p>
 <ol type="i">
 <li>Analyze the Service types ClusterIP, NodePort and LoadBalancer. <i>[2]</i></li>
 <li>Choose one for each of the three components, and justify each choice. <i>[3]</i></li>
 </ol>
 <p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
-<p><b>(b)</b> The Ingress below should send every request for <code>books.example.com</code> to the <code>web</code> Service, and requests under <code>/api</code> to the catalog Service. Both Services listen on port 80; the ingress controller’s class is <code>nginx</code>.</p>
-<pre><code>apiVersion: networking.k8s.io/v1
-kind: Ingress
+<p><b>(b)</b> The HTTPRoute below should attach to the <code>bookstore</code> Gateway, send every request for <code>books.example.com</code> to the <code>web</code> Service, and send requests under <code>/api</code> to the <code>catalog</code> Service. Both Services listen on port 80.</p>
+<pre><code>apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: bookstore
 spec:
+  parentRefs:
+  - name: main
+  hostnames:
+  - books.example.com
   rules:
-  - host: books.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Exact
-        backend:
-          service:
-            name: web
-            port:
-              number: 8080
-      - path: /api
-        pathType: Prefix
-        backend:
-          service:
-            name: books-api
-            port:
-              number: 80</code></pre>
+  - matches:
+    - path:
+        type: Exact
+        value: /
+    backendRefs:
+    - name: web
+      port: 8080
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: books-api
+      port: 80</code></pre>
 <ol type="i">
 <li>Detect any three errors, and state how to fix each. <i>[3]</i></li>
-<li>Analyze why one Ingress is cheaper and simpler than giving each Service its own cloud load balancer. <i>[2]</i></li>
+<li>Analyze why one shared Gateway is cheaper and simpler than giving each Service its own cloud load balancer. <i>[2]</i></li>
 </ol>
 <p class="marks">(5 marks · CO2 · PO4 · BL4)</p>
 </div>
