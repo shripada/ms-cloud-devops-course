@@ -28,7 +28,7 @@
   <p class="sub">Set up many servers the same way, and run it again safely</p>
   <aside class="notes">
     Press S for this speaker view, T to switch light/dark, Esc for the slide overview.
-    One hour: scenario and the gap Terraform leaves (7 min), how Ansible works (15 min), three-server demo (22 min), spot the problems (10 min), checks and exit question (6 min).
+    One hour: scenario and the gap Terraform leaves (7 min), how Ansible works (15 min), three-server demo (22 min), spot the problems (10 min), checks and exit question (6 min). The three Kubernetes slides after the demo are optional: skip them if short of time.
     Before class: install Ansible in the venv and pull python:3.13-slim; both take a few minutes.
   </aside>
 </section>
@@ -70,7 +70,7 @@
       <text class="m" x="630" y="345">packages, services</text>
     </g>
   </svg>
-  <p class="take fragment">Terraform talks to the cloud's API. It cannot create a user on the server.</p>
+  <p class="take fragment">Terraform talks to the cloud's API. It has no way to check or fix a user inside the server on later runs.</p>
   <aside class="notes">Terraform can run a script once when a server is created (a provisioner). HashiCorp calls provisioners a last resort: they don't run again and can't detect a later hand change. Source: https://developer.hashicorp.com/terraform/language/resources/provisioners/syntax</aside>
 </section>
 
@@ -81,7 +81,7 @@
     <tr><td>Main job</td><td>Create and delete infrastructure: networks, clusters, servers</td><td>Set up what is inside existing servers: users, files, packages</td></tr>
     <tr class="fragment"><td>Talks to</td><td>Cloud APIs</td><td>Each server, usually over SSH</td></tr>
     <tr class="fragment"><td>How it knows what exists</td><td>A state file</td><td>No state file: checks each server on every run</td></tr>
-    <tr class="fragment"><td>Order</td><td>First</td><td>Then</td></tr>
+    <tr class="fragment"><td>Order</td><td>Runs first: creates the server</td><td>Runs next: sets it up</td></tr>
     <tr class="fragment"><td>In container-based teams</td><td>Creates the cluster</td><td>Mainly sets up the servers Kubernetes runs on; can also apply Kubernetes objects</td></tr>
   </table>
   <p class="take fragment">Writing the setup of servers as code is called <b>configuration management</b>.</p>
@@ -102,7 +102,8 @@
     <tr class="fragment"><td><b>Inventory</b></td><td>File listing the hosts, in groups</td><td>8 in <code>runners</code>, 2 in <code>staging</code></td></tr>
     <tr class="fragment"><td><b>Module</b></td><td>Program that makes one thing true</td><td><code>user</code>: a user exists</td></tr>
     <tr class="fragment"><td><b>Task</b></td><td>One use of a module, with values</td><td><code>user</code> with name <code>deploy</code></td></tr>
-    <tr class="fragment"><td><b>Playbook</b></td><td>YAML file: hosts, then tasks in order</td><td><code>setup.yml</code>: user, folder, settings</td></tr>
+    <tr class="fragment"><td><b>Play</b></td><td>Which hosts, and the tasks for them, in order</td><td>On <code>runners</code>: user, folder, settings</td></tr>
+    <tr class="fragment"><td><b>Playbook</b></td><td>YAML file: a list of plays</td><td><code>setup.yml</code>: user, folder, settings</td></tr>
   </table>
   <aside class="notes">Source: https://docs.ansible.com/ansible/latest/getting_started/basic_concepts.html. The docs call the control machine the "control node" and managed hosts "managed nodes".</aside>
 </section>
@@ -141,6 +142,7 @@
   <ol class="lead">
     <li>Read the inventory: which hosts</li>
     <li class="fragment">Read the playbook: which tasks, in order</li>
+    <li class="fragment">Gather facts: read details about each host, such as its OS and IP address</li>
     <li class="fragment">For each task, on every host: connect over SSH, copy the module, run it</li>
     <li class="fragment">The module <b>checks first</b>: already right → <code>ok</code>, otherwise fix it → <code>changed</code></li>
     <li class="fragment">Delete the module, go to the next task</li>
@@ -175,7 +177,7 @@
 <section>
   <h2>Inventory: the hosts, in groups</h2>
   <div class="cols wide-left">
-<pre class="yaml big"><code class="language-ini" data-trim data-line-numbers="1-3|5-6" data-fragment-index="0">
+<pre class="yaml big"><code class="language-ini" data-trim data-line-numbers="1-6|1-3|5-6" data-fragment-index="0">
 [runners]
 runner1.example.com
 runner2.example.com
@@ -189,16 +191,17 @@ stage1.example.com
       <div class="step fragment" data-fragment-index="1"><h3>Group <code>staging</code></h3><p>A playbook can target one group, or <code>all</code>.</p></div>
     </div>
   </div>
-  <p class="take fragment">Server 21 is one more line under <code>[runners]</code>.</p>
+  <p class="take fragment">A new build server is one more line under <code>[runners]</code>.</p>
   <aside class="notes">Source: https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html</aside>
 </section>
 
 <section>
   <h2>A playbook, piece by piece</h2>
   <div class="cols wide-left">
-<pre class="yaml"><code class="language-yaml" data-trim data-line-numbers="1-13|1-2|3|4-7|5-7|9-13" data-fragment-index="0">
+<pre class="yaml"><code class="language-yaml" data-trim data-line-numbers="1-14|1-3|4|5-8|6-8|10-14" data-fragment-index="0">
 - name: Prepare build servers
   hosts: runners
+  become: true
   tasks:
     - name: Create the deploy user
       ansible.builtin.user:
@@ -213,10 +216,10 @@ stage1.example.com
 </code></pre>
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0"><h3>setup.yml</h3><p>A YAML file. Read it top to bottom.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="0"><h3>Play</h3><p>A name, and which hosts: the <code>runners</code> group from the inventory.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>Play</h3><p>A name, which hosts (the <code>runners</code> group from the inventory), and <code>become: true</code>: run the tasks as root, through sudo.</p></div>
       <div class="step fragment current-visible" data-fragment-index="1"><h3>tasks</h3><p>The list of things to do, in order.</p></div>
       <div class="step fragment current-visible" data-fragment-index="2"><h3>A task</h3><p>A name you will see in the output, and one module.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="3"><h3>Module and values</h3><p>Module <code>user</code>. Values: the user is called <code>deploy</code>, with the bash shell.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="3"><h3>Module and values</h3><p>Module <code>user</code>. Values: the user is called <code>deploy</code>, with the bash shell.</p><p class="muted"><code>ansible.builtin</code> = comes with Ansible. Other prefixes are add-on collections.</p></div>
       <div class="step fragment" data-fragment-index="4"><h3>Second task</h3><p>Module <code>file</code>: <code>/opt/app</code> is a folder owned by <code>deploy</code>.</p></div>
     </div>
   </div>
@@ -233,9 +236,9 @@ stage1.example.com
       <p class="fragment" data-fragment-index="1">Second run:<br><span class="muted">“user already exists”, “File exists”</span></p>
     </div>
     <div class="card good">
-      <h3>Ansible task: result</h3>
-<pre class="term small"><span class="out">user deploy exists</span>
-<span class="out">/opt/app is a folder</span></pre>
+      <h3>Ansible task: the result you want</h3>
+<pre class="term small"><span class="out">make sure user deploy exists</span>
+<span class="out">make sure /opt/app is a folder</span></pre>
       <p class="fragment" data-fragment-index="1">Second run:<br><span class="muted">checks, finds it already true, does nothing</span></p>
     </div>
   </div>
@@ -260,7 +263,7 @@ stage1.example.com
 <span class="ok">ok: [runner1]</span></pre>
     </div>
   </div>
-  <p class="take fragment">A <code>changed</code> on a later run means someone changed that server by hand.</p>
+  <p class="take fragment">If the playbook and its values didn't change, a <code>changed</code> means someone edited that server by hand.</p>
 </section>
 
 <section>
@@ -288,11 +291,12 @@ content: |
       <p>Ansible loads the file with the group's name and fills in each <code>{{ }}</code> for each host.</p>
     </div>
   </div>
-  <p class="take fragment">The typo on server 7 can't happen: the value is written once.</p>
+  <p class="take fragment">The value is written once. All runners get the same value, and a mistake is fixed in one place.</p>
 </section>
 
 <section>
   <h2>Vault: a password that is safe in Git</h2>
+  <p class="muted">A group's variables can also be a folder of files: <code>group_vars/runners/</code>. The secret goes in its own file there.</p>
 <pre class="term"><span class="cmd">cat group_vars/runners/vault.yml</span>
 <span class="out">registry_password: "Gh0st@2026"</span>
 <span class="cmd">ansible-vault encrypt group_vars/runners/vault.yml</span>
@@ -315,16 +319,33 @@ content: |
 
 <section>
   <div class="kicker">Before the demo</div>
-  <h2>Ansible, and three stand-in servers</h2>
-<pre class="term small"><span class="cmd">uv venv -p 3.13 ~/ansible-env</span>
+  <h2>Install Ansible on your laptop</h2>
+<pre class="term small"><span class="cm"># 1. uv: a tool that installs Python packages</span>
+<span class="cmd">brew install uv</span>                                      <span class="cm"># macOS</span>
+<span class="cmd">curl -LsSf https://astral.sh/uv/install.sh | sh</span>      <span class="cm"># Linux, WSL2</span>
+<span class="cm"># 2. a separate Python just for Ansible, used in this terminal</span>
+<span class="cmd">uv venv -p 3.13 ~/ansible-env</span>
 <span class="cmd">source ~/ansible-env/bin/activate</span>
+<span class="cm"># 3. install Ansible, then check</span>
 <span class="cmd">uv pip install ansible</span>
-<span class="cm"># three containers play the part of three servers</span>
+<span class="cmd">ansible --version</span></pre>
+  <div class="cols">
+    <p><b>You now have the commands</b><br><span class="muted"><code>ansible</code>, <code>ansible-playbook</code>, <code>ansible-vault</code></span></p>
+    <p><b>Every new terminal</b><br><span class="muted">Run the <code>source</code> line again, or the commands are not found</span></p>
+  </div>
+  <p class="take">Windows: install WSL2 (Ubuntu) and do all of this inside it. Ansible's control machine must be macOS or Linux.</p>
+  <aside class="notes">Install only on the control machine; nothing goes on the servers. The ansible package includes the community.docker collection used by the demo inventory. Source: https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html and https://docs.astral.sh/uv/getting-started/installation/</aside>
+</section>
+
+<section>
+  <div class="kicker">Before the demo</div>
+  <h2>Three stand-in servers</h2>
+<pre class="term"><span class="cm"># three containers play the part of three servers</span>
 <span class="cmd">for h in runner1 runner2 stage1; do</span>
 <span class="out">  docker run -d --name $h python:3.13-slim sleep infinity</span>
 <span class="out">done</span></pre>
   <p class="take">Real servers cost money and need SSH keys. Containers are free, and Ansible reaches them with <code>docker exec</code> instead of SSH.</p>
-  <aside class="notes">Windows: run all of this in WSL2 (Ubuntu); Ansible's control machine must be macOS or Linux. uv comes from brew install uv. Inventory, modules, variables and ok/changed behave exactly as with real servers; SSH keys, sudo and service managers are not covered.</aside>
+  <aside class="notes">Inventory, modules, variables and ok/changed behave exactly as with real servers; SSH keys, sudo and service managers are not covered.</aside>
 </section>
 
 <section>
@@ -348,7 +369,7 @@ ansible_python_interpreter=/usr/local/bin/python3
       <div class="step fragment" data-fragment-index="0"><h3>For every host</h3><p>Connect through Docker, not SSH. Use this Python on the host.</p></div>
     </div>
   </div>
-  <p class="take fragment">With real servers: IP addresses here, and no <code>ansible_connection</code> line. Ansible uses SSH.</p>
+  <p class="take fragment">With real servers: IP addresses here, no <code>ansible_connection</code> line, and <code>become: true</code> in the playbook. Ansible uses SSH.</p>
 </section>
 
 <section>
@@ -368,14 +389,31 @@ ansible_python_interpreter=/usr/local/bin/python3
 <section>
   <div class="kicker">Demo · step 2</div>
   <h2>Values per group</h2>
-<pre class="term"><span class="cmd">mkdir group_vars</span>
-<span class="cm"># group_vars/runners.yml</span>
-<span class="out">app_env: ci</span>
-<span class="out">max_jobs: 4</span>
-<span class="cm"># group_vars/staging.yml</span>
-<span class="out">app_env: staging</span>
-<span class="out">max_jobs: 1</span></pre>
-  <p class="take">File name = group name. Ansible finds them by itself.</p>
+  <div class="cols">
+    <div>
+      <p class="muted">1. Make a <code>group_vars</code> folder next to the inventory</p>
+<pre class="term small"><span class="out">config-demo/</span>
+<span class="out">  inventory.ini</span>
+<span class="out">  group_vars/</span>
+<span class="hi">    runners.yml</span>   <span class="cm"># for runner1, runner2</span>
+<span class="hi">    staging.yml</span>   <span class="cm"># for stage1</span></pre>
+    </div>
+    <div class="fragment">
+      <p class="muted">2. Write two files, one per group</p>
+      <p class="muted"><code>group_vars/runners.yml</code></p>
+<pre class="yaml"><code class="language-yaml" data-trim>
+app_env: ci
+max_jobs: 4
+</code></pre>
+      <p class="muted"><code>group_vars/staging.yml</code></p>
+<pre class="yaml"><code class="language-yaml" data-trim>
+app_env: staging
+max_jobs: 1
+</code></pre>
+    </div>
+  </div>
+  <p class="take fragment">The file name matches the group name in <code>inventory.ini</code>. Ansible loads the file by itself: no change to the playbook or the command.</p>
+  <aside class="notes">Same files as the Variables slide; now we create them for real. Ask: which max_jobs will runner2 get? (4, because runner2 is in [runners].)</aside>
 </section>
 
 <section>
@@ -383,7 +421,7 @@ ansible_python_interpreter=/usr/local/bin/python3
   <h2>Three tasks</h2>
   <div class="cols wide-left">
 <pre class="yaml small"><code class="language-yaml" data-trim data-line-numbers="1-3|4-7|9-14|16-22" data-fragment-index="0">
-- name: Prepare build servers
+- name: Prepare servers
   hosts: all
   tasks:
     - name: Create the deploy user
@@ -408,9 +446,9 @@ ansible_python_interpreter=/usr/local/bin/python3
 </code></pre>
     <div class="stack">
       <div class="step fragment fade-out" data-fragment-index="0"><h3>Play</h3><p>All hosts in the inventory.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="0"><h3>user</h3><p>User <code>deploy</code> exists.</p></div>
-      <div class="step fragment current-visible" data-fragment-index="1"><h3>file</h3><p>Folder exists, owned by <code>deploy</code>, permissions <code>0755</code>.</p></div>
-      <div class="step fragment" data-fragment-index="2"><h3>copy</h3><p>The file has exactly this content. Values come from the host's group.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="0"><h3>user</h3><p>When run: make sure user <code>deploy</code> exists. Create it only if missing.</p></div>
+      <div class="step fragment current-visible" data-fragment-index="1"><h3>file</h3><p>Make sure the folder exists, owned by <code>deploy</code>, permissions <code>0755</code> (in quotes so YAML keeps it as text).</p></div>
+      <div class="step fragment" data-fragment-index="2"><h3>copy</h3><p>Make sure the file has exactly this content. Values come from the host's group.</p></div>
     </div>
   </div>
 </section>
@@ -420,6 +458,7 @@ ansible_python_interpreter=/usr/local/bin/python3
   <h2>First run</h2>
   <p class="q">Predict first: how many tasks say <code>changed</code> on each host?</p>
 <pre class="term small fragment"><span class="cmd">ansible-playbook -i inventory.ini setup.yml</span>
+<span class="cm"># output trimmed to fit</span>
 <span class="out">TASK [Gathering Facts]           <span class="ok">ok: [runner1] ...</span></span>
 <span class="out">TASK [Create the deploy user]    <span class="hi">changed: [runner1] ...</span></span>
 <span class="out">...</span>
@@ -478,24 +517,36 @@ ansible_python_interpreter=/usr/local/bin/python3
 <section>
   <div class="kicker">Demo · step 7</div>
   <h2>A new server joins</h2>
-<pre class="term"><span class="cmd">docker run -d --name runner3 python:3.13-slim sleep infinity</span>
-<span class="cm"># add runner3 under [runners] in inventory.ini</span>
-<span class="cmd">ansible-playbook -i inventory.ini setup.yml</span>
-<span class="out">runner1 : ok=4  <span class="ok">changed=0</span></span>
-<span class="out">runner2 : ok=4  <span class="ok">changed=0</span></span>
-<span class="out">runner3 : ok=4  <span class="hi">changed=3</span></span>
-<span class="out">stage1  : ok=4  <span class="ok">changed=0</span></span></pre>
-  <p class="take">Server number 21 is one line in the inventory. It ends up exactly like the others.</p>
-  <aside class="notes">Clean up after class: docker rm -f runner1 runner2 runner3 stage1</aside>
+  <p class="muted">1. Start the new server</p>
+<pre class="term small"><span class="cmd">docker run -d --name runner3 python:3.13-slim sleep infinity</span></pre>
+  <div class="cols">
+    <div>
+      <p class="muted">2. Add one line to <code>inventory.ini</code></p>
+<pre class="term small"><span class="out">[runners]</span>
+<span class="out">runner1</span>
+<span class="out">runner2</span>
+<span class="hi">runner3</span></pre>
+    </div>
+    <div class="fragment">
+      <p class="muted">3. Run the same playbook</p>
+<pre class="term small"><span class="cmd">ansible-playbook -i inventory.ini setup.yml</span>
+<span class="out">runner1 : <span class="ok">changed=0</span></span>
+<span class="out">runner2 : <span class="ok">changed=0</span></span>
+<span class="out">runner3 : <span class="hi">changed=3</span></span>
+<span class="out">stage1  : <span class="ok">changed=0</span></span></pre>
+    </div>
+  </div>
+  <p class="take fragment">runner3 got the user, folder and settings file. The others were already right. Next month's 5 servers: 5 more lines, the same command.</p>
+  <aside class="notes">Only the PLAY RECAP's changed counts are shown. Clean up after class: docker rm -f runner1 runner2 runner3 stage1</aside>
 </section>
 
 <section>
   <h2>Can Ansible deploy to Kubernetes too?</h2>
-  <p class="lead">Yes: the <code>kubernetes.core.k8s</code> module applies a manifest through the cluster's API, like <code>kubectl apply</code>. Lesson 17 has the full exercise.</p>
+  <p class="lead">Yes: the <code>kubernetes.core.k8s</code> module applies a manifest through the cluster's API, like <code>kubectl apply</code>. The lesson page has the full exercise.</p>
   <table>
     <tr><th>For Kubernetes objects alone</th><th>Choose Ansible when</th></tr>
     <tr><td><code>kubectl apply</code> and Terraform's Kubernetes provider are also idempotent</td><td>One playbook already sets up your servers, and should deploy the app too</td></tr>
-    <tr class="fragment"><td>Terraform keeps every value in its state file in plain text, passwords included</td><td>The password should stay encrypted in Git with Vault</td></tr>
+    <tr class="fragment"><td>By default, Terraform stores values in its state file in plain text, passwords included</td><td>The password should stay encrypted in Git with Vault</td></tr>
   </table>
   <p class="take fragment">Ansible's main job is the inside of servers. For Kubernetes it is one option among several.</p>
 </section>
@@ -506,8 +557,8 @@ ansible_python_interpreter=/usr/local/bin/python3
   <div class="cols wide-left">
 <pre class="yaml"><code class="language-ini" data-trim data-line-numbers="1-3|5-7" data-fragment-index="0">
 [clusters]
-staging  kube_context=staging  replicas=2
-prod     kube_context=prod     replicas=5
+staging-cluster  kube_context=staging  replicas=2
+prod-cluster     kube_context=prod     replicas=5
 
 [clusters:vars]
 ansible_connection=local
@@ -556,7 +607,6 @@ spec:
 <section class="divider">
   <div class="num">!</div>
   <h2>Spot the problems</h2>
-  <p>Team drill</p>
 </section>
 
 <section>
@@ -573,20 +623,20 @@ spec:
         dest: /etc/runner/registry.env
         content: "REGISTRY_PASSWORD=Gh0st@2026"
 </code></pre>
-  <p class="take">In pairs: find three problems and say how to fix each. <code>shell</code> runs any shell command.</p>
-  <aside class="notes">Give 6 minutes, then take one problem from each of three pairs.</aside>
+  <p class="take">Find at least three problems and say how to fix each. <code>shell</code> runs any shell command.</p>
+  <aside class="notes">Give 6 minutes, then take answers.</aside>
 </section>
 
 <section>
   <h2>Problems and fixes</h2>
   <table>
     <tr><th>Problem</th><th>Fix</th></tr>
-    <tr class="fragment"><td><code>shell</code> runs every time and always says <code>changed</code>: a hand change can't be spotted</td><td>A module that describes the result, such as <code>apt</code> with <code>state: present</code></td></tr>
-    <tr class="fragment"><td><code>echo &gt;&gt;</code> adds another line on every run</td><td><code>copy</code> with the whole file content: written exactly once</td></tr>
+    <tr class="fragment"><td><code>shell</code> runs every time and always says <code>changed</code>: a hand change can't be spotted</td><td>A module that describes the result, such as <code>apt</code> with <code>name: docker.io</code> and <code>state: present</code></td></tr>
+    <tr class="fragment"><td><code>echo &gt;&gt;</code> adds another line on every run</td><td><code>lineinfile</code>: makes sure the line is there exactly once</td></tr>
     <tr class="fragment"><td>Password in plain text in Git</td><td>Vault-encrypted variable: <code>{{ registry_password }}</code></td></tr>
     <tr class="fragment"><td><code>hosts: all</code>, no groups</td><td>Inventory groups and <code>--limit</code> to try a few servers first</td></tr>
   </table>
-  <aside class="notes">apt is the package module for Ubuntu/Debian. Also accept lineinfile or template for the second problem, and no_log: true on the password task.</aside>
+  <aside class="notes">apt is the package module for Ubuntu/Debian. docker.io is Ubuntu's own Docker package; docker-ce needs Docker's apt repository added first. Also accept copy with the whole file, or template, for the second problem, and no_log: true on the password task.</aside>
 </section>
 
 <!-- ============ Check ============ -->
@@ -599,19 +649,19 @@ spec:
 <section>
   <div class="kicker">Check 1</div>
   <p class="q">Terraform created a server. Why don't we also use Terraform to create the <code>deploy</code> user on it?</p>
-  <div class="a fragment">Terraform manages things through cloud APIs. A user inside the server is not a cloud resource, so Terraform has nothing to check or fix. Ansible connects to the server and manages what is inside.</div>
+  <div class="a fragment">Terraform manages things through cloud APIs. It can run a setup script once when the server starts, but it cannot check or fix the user inside the server on later runs. Ansible connects to the server and checks what is inside on every run.</div>
 </section>
 
 <section>
   <div class="kicker">Check 2</div>
   <p class="q">What must be on a Linux server before Ansible can manage it?</p>
-  <div class="a fragment">Only SSH access and Python. No agent, and no Ansible.</div>
+  <div class="a fragment">SSH access, Python, and a user that can use sudo for system changes. No agent, and no Ansible.</div>
 </section>
 
 <section>
   <div class="kicker">Check 3</div>
   <p class="q">A second run says <code>changed=0</code> on every host. What does that tell you?</p>
-  <div class="a fragment">Every server already matched the playbook, so nothing was done. Nobody changed anything by hand.</div>
+  <div class="a fragment">Everything the playbook manages still matches on every server, so nothing was done. Ansible doesn't look at anything else: a hand change to another file would go unnoticed.</div>
 </section>
 
 <section>

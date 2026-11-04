@@ -39,8 +39,8 @@
 <p><a href="https://docs.ansible.com/ansible/latest/getting_started/basic_concepts.html">[Ansible docs: Concepts]</a> The three ideas below explain why this works well.</p>
 
 <h2>Three ideas, no more</h2>
-<p><b>Agentless, with an inventory</b>: Ansible runs on one <em>control machine</em> (your laptop, or a CI job). It connects to each target over SSH, copies a small Python program, runs it, and deletes it. Nothing has to be installed or kept running on the targets, apart from SSH and Python. (Chef and Puppet need an agent on every machine.) The <em>inventory</em> is a file listing the targets, in groups like <code>runners</code> and <code>staging</code>, so a playbook can target one group. <a href="https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html">[Ansible docs: Inventory]</a></p>
-<p><b>Idempotent tasks: ok vs changed</b>: a <em>playbook</em> is a list of tasks. Each task uses a <em>module</em> that describes a state, not a command: “user <code>deploy</code> exists”, not <code>useradd deploy</code>. The module checks first. If the machine is already right, it reports <code>ok</code> and does nothing. If not, it fixes it and reports <code>changed</code>. So you can run a playbook ten times safely, and the second run tells you whether anyone changed anything by hand. <a href="https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html">[Ansible docs: Playbooks]</a></p>
+<p><b>Agentless, with an inventory</b>: Ansible runs on one <em>control machine</em> (your laptop, or a CI job). It connects to each target over SSH, copies a small Python program, runs it, and deletes it. Nothing has to be installed or kept running on the targets, apart from SSH and Python, plus a user that can use sudo for system changes. (Chef and Puppet need an agent on every machine.) The <em>inventory</em> is a file listing the targets, in groups like <code>runners</code> and <code>staging</code>, so a playbook can target one group. <a href="https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html">[Ansible docs: Inventory]</a></p>
+<p><b>Idempotent tasks: ok vs changed</b>: a <em>playbook</em> is a list of tasks. Each task uses a <em>module</em> that describes the result you want, not a command: “make sure user <code>deploy</code> exists”, not <code>useradd deploy</code>. Nothing happens until you run the playbook. Then the module checks first. If the machine is already right, it reports <code>ok</code> and does nothing. If not, it fixes it and reports <code>changed</code>. So you can run a playbook ten times safely. If the playbook and its values haven't changed, a <code>changed</code> on a later run means someone edited that machine by hand. Ansible only checks what the playbook manages: a hand change to any other file goes unnoticed. <a href="https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html">[Ansible docs: Playbooks]</a></p>
 <p><b>Variables and Vault</b>: one playbook, different values per group or host (<code>max_jobs: 4</code> on runners, <code>1</code> on staging), kept in <code>group_vars/</code> files. Secrets like a database password go in a variables file encrypted with <em>Ansible Vault</em> (AES-256). The encrypted file is safe to commit; the playbook decrypts it in memory when you give the vault password. <a href="https://docs.ansible.com/ansible/latest/vault_guide/index.html">[Ansible docs: Vault]</a></p>
 <p class="aside">Your college's lab assistant has to set up 60 lab PCs before the practical exam. Going to each PC is slow, and PC 43 always ends up different. Instead, there's a checklist (playbook) and a list of PCs by lab (inventory: Lab A, Lab B). For each item the assistant checks first: “Python installed? Yes, tick (ok). Wallpaper wrong? Fix it (changed).” Running the checklist again an hour later should give all ticks.</p>
 
@@ -56,12 +56,13 @@
 
 <h2>Before you start</h2>
 <p>Docker Desktop running, with your 3-node cluster. Ansible's control machine must be macOS or Linux; on Windows, use WSL2 (Ubuntu) and run everything there. Install Ansible plus the Python library its Kubernetes module needs, in a virtual environment:</p>
-<pre><code>brew install uv
+<pre><code>brew install uv                                   # macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux or WSL2 (use one of these two)
 uv venv -p 3.13 ~/ansible-env
 source ~/ansible-env/bin/activate
 uv pip install ansible kubernetes
 ansible --version</code></pre>
-<p>Run <code>source ~/ansible-env/bin/activate</code> in every new terminal. (The <code>kubernetes</code> library is needed only for the Kubernetes exercise.) Make a folder, <code>config-demo</code>, and work in it.</p>
+<p><code>uv</code> is a tool that installs Python packages. <code>uv venv</code> makes a separate Python just for Ansible, and <code>source</code> switches this terminal to it. Installing the <code>ansible</code> package gives you the commands <code>ansible</code>, <code>ansible-playbook</code> and <code>ansible-vault</code>; <code>ansible --version</code> checks that they work. Install it only on your control machine, never on the servers. Run <code>source ~/ansible-env/bin/activate</code> in every new terminal, or the commands are not found. (The <code>kubernetes</code> library is needed only for the Kubernetes exercise.) Make a folder, <code>config-demo</code>, and work in it.</p>
 <p>We need some servers to manage. Real targets would be VMs reached by SSH. To keep it free and fast, we'll use three containers as stand-in machines, and tell Ansible to reach them with <code>docker exec</code> instead of SSH. The inventory, variables, modules and idempotence behave the same way; the exercise does not cover real-server concerns such as SSH keys and host verification, privilege escalation, service managers or OS package differences.</p>
 <pre><code>for h in runner1 runner2 stage1; do
   docker run -d --name $h python:3.13-slim sleep infinity
@@ -92,7 +93,7 @@ and <code>group_vars/staging.yml</code>:
 max_jobs: 1</code></pre>
 Ansible loads these automatically for hosts in the group with the same name.</li>
 <li>Write the playbook, <code>setup.yml</code>:
-<pre><code>- name: Prepare build machines
+<pre><code>- name: Prepare servers
   hosts: all
   tasks:
     - name: Create the deploy user
@@ -114,7 +115,7 @@ Ansible loads these automatically for hosts in the group with the same name.</li
         content: |
           APP_ENV={{ app_env }}
           MAX_JOBS={{ max_jobs }}</code></pre>
-Every task says what should be true. <code>{{ app_env }}</code> is filled in from the variables, per host.</li>
+Every task says what should be true. <code>{{ app_env }}</code> is filled in from the variables, per host. <code>ansible.builtin</code> means the module comes with Ansible; other prefixes, such as <code>community.docker</code>, are add-on collections. <code>"0755"</code> is in quotes so YAML keeps it as text. On real servers you log in as a normal user such as <code>ubuntu</code>, so add <code>become: true</code> under <code>hosts:</code> to run the tasks as root through sudo. The containers already run as root and have no sudo, so leave it out here.</li>
 <li><b>Predict first:</b> on the first run, how many tasks will say <code>changed</code> on each host? Then:
 <pre><code>ansible-playbook -i inventory.ini setup.yml
 docker exec runner1 cat /opt/app/settings.env
@@ -139,7 +140,7 @@ Only <code>stage1</code> runs. The runners aren't touched, even though the playb
 </ol>
 
 <h2>Going further: deploy to Kubernetes, with a secret</h2>
-<p>Ansible can also deploy apps to a Kubernetes cluster, but it is not always the best choice. For Kubernetes objects alone, <code>kubectl apply</code> (lesson 11) and Terraform's Kubernetes provider also re-run safely. Ansible makes sense when one playbook already sets up your servers and should deploy the app too, or when a password must stay encrypted in Git: Terraform keeps every value, passwords included, in its state file in plain text.</p>
+<p>Ansible can also deploy apps to a Kubernetes cluster, but it is not always the best choice. For Kubernetes objects alone, <code>kubectl apply</code> (lesson 11) and Terraform's Kubernetes provider also re-run safely. Ansible makes sense when one playbook already sets up your servers and should deploy the app too, or when a password must stay encrypted in Git: by default, Terraform stores values in its state file in plain text, passwords included.</p>
 <p>Ansible doesn't need SSH for this part. The <code>kubernetes.core.k8s</code> module talks straight to the cluster's API, using your kubeconfig, the same way kubectl does. So the “target” is your own laptop (<code>ansible_connection=local</code>), and nothing is installed on the cluster. We'll pretend two namespaces are two clusters, dev and prod.</p>
 <ol class="steps" start="11">
 <li>Create <code>clusters.ini</code>:
@@ -152,7 +153,7 @@ ansible_connection=local
 ansible_python_interpreter="{{ ansible_playbook_python }}"
 kube_context=docker-desktop</code></pre>
 Each “host” is an environment with its own values. With real clusters, prod would have its own <code>kube_context</code>, for example the one <code>aws eks update-kubeconfig</code> adds. The interpreter line makes the module use the Python where you installed the <code>kubernetes</code> library.</li>
-<li>Store the database password, encrypted. Create <code>group_vars/clusters/vault.yml</code>:
+<li>Store the database password, encrypted. A group's variables can be one file or a folder of files; here the folder <code>group_vars/clusters/</code> keeps the secret in its own file. Create <code>group_vars/clusters/vault.yml</code>:
 <pre><code>db_password: "S3cret-Prod-Pass"</code></pre>
 then encrypt it (choose a vault password and remember it):
 <pre><code>ansible-vault encrypt group_vars/clusters/vault.yml
@@ -227,7 +228,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <code>-e</code> overrides a variable for this run. Only dev changes. Clean up: <code>kubectl delete namespace shop-dev shop-prod</code>.</li>
 </ol>
 
-<div class="trap"><b>In-class drill · 15 minutes: spot the problems.</b> A team sets up 15 CI runners with this “playbook”. Find three problems and say how to fix each.
+<div class="trap"><b>In-class drill · 15 minutes: spot the problems.</b> A team sets up 15 CI runners with this “playbook”. Find at least three problems and say how to fix each.
 <pre><code>- hosts: all
   tasks:
     - name: Install Docker
@@ -239,7 +240,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
         dest: /etc/runner/registry.env
         content: "REGISTRY_PASSWORD=Gh0st@2026"</code></pre>
 <details><summary>Show the answer</summary>
-<p>1. <b><code>shell</code> instead of state-based modules</b>: the shell commands run every time and always report <code>changed</code>, so you can't spot drift, and re-running the install script on every run is slow and risky. Use a package module, for example <code>ansible.builtin.apt</code> with <code>state: present</code>. 2. <b><code>echo &gt;&gt;</code> appends</b>: every run adds another <code>concurrent=4</code> line, so the file grows. Use <code>ansible.builtin.lineinfile</code> or a <code>template</code>, which make sure the line is there exactly once. 3. <b>Password in plain text in the playbook</b>: it's in Git for everyone to read. Put it in a vault-encrypted variables file and use <code>{{ registry_password }}</code>, with <code>no_log: true</code>. Also accept: <code>hosts: all</code> with no groups, so you can't roll out to a few runners first; use inventory groups and <code>--limit</code>.</p></details>
+<p>1. <b><code>shell</code> instead of state-based modules</b>: the shell commands run every time and always report <code>changed</code>, so you can't spot drift, and re-running the install script on every run is slow and risky. Use a package module, for example <code>ansible.builtin.apt</code> with <code>name: docker.io</code> (Ubuntu's own Docker package) and <code>state: present</code>. 2. <b><code>echo &gt;&gt;</code> appends</b>: every run adds another <code>concurrent=4</code> line, so the file grows. Use <code>ansible.builtin.lineinfile</code> or a <code>template</code>, which make sure the line is there exactly once. 3. <b>Password in plain text in the playbook</b>: it's in Git for everyone to read. Put it in a vault-encrypted variables file and use <code>{{ registry_password }}</code>, with <code>no_log: true</code>. Also accept: <code>hosts: all</code> with no groups, so you can't roll out to a few runners first; use inventory groups and <code>--limit</code>.</p></details>
 </div>
 
 <h2>Homework and extra practice</h2>
@@ -281,7 +282,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <textarea aria-label="Answer to Ansible practice question 2" placeholder="Write your answer…"></textarea>
 <details><summary>Model answer and marking</summary>
 <ul>
-<li><b>Tool:</b> Ansible. It's agentless (it needs only SSH and Python on the targets), keeps machines in an inventory with groups, and uses idempotent modules. Chef and Puppet need an agent installed and running on every machine, which the scenario rules out.</li>
+<li><b>Tool:</b> Ansible. It's agentless (it needs only SSH, Python and a user that can use sudo on the targets; the playbook sets <code>become: true</code>), keeps machines in an inventory with groups, and uses idempotent modules. Chef and Puppet need an agent installed and running on every machine, which the scenario rules out.</li>
 <li><b>Which machines:</b> an inventory file lists the servers' host names or IP addresses in groups, for example <code>[builders]</code> with all eight and <code>[android]</code> with three of them. The playbook says <code>hosts: builders</code>. (A dynamic inventory can also list EC2 machines by their tags.)</li>
 <li><b>New server:</b> add its address to the inventory under <code>[builders]</code> and run the same playbook. It ends up exactly like the others, and the existing servers report <code>ok</code>.</li>
 <li><b>Only the Android servers:</b> <code>ansible-playbook -i inventory.ini builders.yml --limit android</code>. The playbook runs only on that group, even though it targets all builders.</li>
@@ -317,16 +318,16 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <h2>Check yourself</h2>
 <p class="aside">Answer before clicking.</p>
 
-<div class="quiz" data-answer="2" data-explain="Ansible connects over SSH (or another connection), copies a small module, runs it and removes it. Only SSH and Python are needed on the target.">
+<div class="quiz" data-answer="2" data-explain="Ansible connects over SSH (or another connection), copies a small module, runs it and removes it. Only SSH and Python are needed on the target, plus a user that can use sudo for system changes.">
 <p class="q">1. What must be installed on a Linux server before Ansible can manage it?</p>
 <button>The Ansible agent, running as a service</button>
 <button>Ansible itself, the same version as the control machine</button>
-<button>Only SSH access and Python</button>
+<button>Only SSH access and Python (and a user that can use sudo)</button>
 <div class="fb"></div></div>
 
-<div class="quiz" data-answer="0" data-explain="changed=0 means every module checked the machine and found it already in the desired state, so nothing was done. That's idempotence.">
+<div class="quiz" data-answer="0" data-explain="changed=0 means every module checked the machine and found it already in the desired state, so nothing was done. That's idempotence. Ansible doesn't look at anything the playbook doesn't manage, so a hand change to another file would go unnoticed.">
 <p class="q">2. You run a playbook a second time and the recap says <code>changed=0</code> on every host. What does that tell you?</p>
-<button>Every machine already matched the playbook; nothing was done</button>
+<button>Everything the playbook manages already matched; nothing was done</button>
 <button>The playbook was skipped because it ran recently</button>
 <button>The tasks failed silently</button>
 <div class="fb"></div></div>
@@ -349,7 +350,7 @@ ansible-playbook -i clusters.ini deploy.yml --ask-vault-pass</code></pre>
 <p class="q">5. Exit question · 5 minutes: “Your team sets up 20 build servers by hand over SSH. Explain how Ansible would do it: what files you write, how each group of servers gets its own job limit, and why running it twice is safe.”</p>
 <textarea aria-label="Answer to Ansible exit question" placeholder="Your answer, from memory…"></textarea>
 <details><summary>Compare with a model answer</summary>
-<p>Ansible, run from one control machine (a laptop or a CI job). An <b>inventory</b> file lists the 20 servers in groups, for example <code>[runners]</code> and <code>[staging]</code>; a new server is one more line. A <b>playbook</b> lists tasks in order, and each task uses a <b>module</b> that states a result, not a command: “user <code>deploy</code> exists”, “<code>/opt/app</code> is a folder”, “<code>settings.env</code> has this content”. The job limit is a variable, <code>max_jobs</code>, set once per group in <code>group_vars/runners.yml</code> (4) and <code>group_vars/staging.yml</code> (1); the settings file uses <code>{{ max_jobs }}</code>, so a typo on one server can't happen. Ansible connects over SSH and needs only SSH and Python on the servers, no agent. Running it twice is safe because each module checks first: if the server already matches, it reports <code>ok</code> and does nothing; otherwise it fixes it and reports <code>changed</code>. A second run shows <code>changed=0</code>, and a <code>changed</code> on a later run shows which server someone edited by hand.</p></details>
+<p>Ansible, run from one control machine (a laptop or a CI job). An <b>inventory</b> file lists the 20 servers in groups, for example <code>[runners]</code> and <code>[staging]</code>; a new server is one more line. A <b>playbook</b> lists tasks in order, and each task uses a <b>module</b> that states a result, not a command: “user <code>deploy</code> exists”, “<code>/opt/app</code> is a folder”, “<code>settings.env</code> has this content”. The job limit is a variable, <code>max_jobs</code>, set once per group in <code>group_vars/runners.yml</code> (4) and <code>group_vars/staging.yml</code> (1); the settings file uses <code>{{ max_jobs }}</code>, so every runner gets the same value and a mistake is fixed in one place. Ansible connects over SSH and needs only SSH and Python on the servers, no agent. Running it twice is safe because each module checks first: if the server already matches, it reports <code>ok</code> and does nothing; otherwise it fixes it and reports <code>changed</code>. A second run shows <code>changed=0</code>. If the playbook and its values haven't changed, a <code>changed</code> on a later run shows which server someone edited by hand.</p></details>
 </div>
 
 <h2>Read next</h2>
