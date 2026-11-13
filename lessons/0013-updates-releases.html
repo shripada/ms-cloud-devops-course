@@ -6,7 +6,7 @@
 <h2>Why this matters for DevOps</h2>
 <p>Think of IRCTC at 10 a.m., when Tatkal booking opens. The team can't say “site down for 10 minutes, we're deploying”. Real teams ship many times a day, while users keep clicking. So every release must replace old Pods with new ones a few at a time, check each new Pod is ready before it gets traffic, and have a one-command way back when the new version is broken. That's what a Deployment's rollout does for you, as long as you set it up right.</p>
 
-<h2>Three ideas, no more</h2>
+<h2>Key ideas</h2>
 <p><b>A rollout makes a new ReplicaSet</b>: when you change anything in a Deployment's Pod <code>template</code> (usually the image), the Deployment creates a <em>new</em> ReplicaSet for the new version, scales it up, and scales the old one down. The old ReplicaSet is kept at 0 replicas. That's the rollback: “scale the old one back up”. Changing only <code>replicas</code> doesn't touch the template, so no rollout happens. That answers lesson 11's stretch question. <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[Kubernetes docs: Deployments]</a></p>
 <p><b>maxSurge and maxUnavailable</b>: the two dials of the <code>RollingUpdate</code> strategy. <code>maxSurge</code> is how many <em>extra</em> Pods may exist above <code>replicas</code> during the update. <code>maxUnavailable</code> is how many of the wanted Pods may be not-ready. With 4 replicas, <code>maxSurge: 1</code> and <code>maxUnavailable: 0</code>, Kubernetes starts 1 new Pod (5 in total), waits until it's <em>ready</em>, removes 1 old Pod, and repeats. Users never have fewer than 4 ready Pods. The readiness probe from lesson 12 is what “ready” means here.</p>
 <p><b>Release strategies</b>:</p>

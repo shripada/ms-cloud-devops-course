@@ -6,7 +6,7 @@
 <h2>Why this matters for DevOps</h2>
 <p>Almost every company you will join ships its software as containers. In placement interviews for Cloud and DevOps roles, one of the first questions is usually: <em>“What is the difference between an image, a container and a VM?”</em> By the end of this page you can answer it, and you will have actually done it, not just read about it.</p>
 
-<h2>Three ideas, no more</h2>
+<h2>Key ideas</h2>
 <p><b>Image</b>: a package that contains everything needed to run a program: files, binaries, libraries and config. An image never changes once it is built (it is <em>immutable</em>), and it is made of <em>layers</em>. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">[Docker docs]</a></p>
 <p><b>Container</b>: a running, <em>isolated process</em> started from an image. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">[Docker docs]</a> You studied OOP in college, so think of it this way: the image is the class and the container is the object. One image can give you many containers.</p>
 <p><b>Not a VM</b>: a virtual machine boots a complete operating system with its own kernel. A container does not. All containers <em>share the host's kernel</em>. Remember the OS subject: a process is just a program in execution managed by the kernel. That is why containers start in milliseconds and use very little memory. <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">[Docker docs]</a></p>

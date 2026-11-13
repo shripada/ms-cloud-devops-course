@@ -6,7 +6,7 @@
 <h2>Why this matters for DevOps</h2>
 <p>Writing a Dockerfile is maybe 20% of the job. The other 80% is the call that says “the container keeps crashing” or “the site is not opening”. A DevOps engineer is the person who calmly finds out why. Interviewers love this topic because it shows whether you have actually used Docker or only read about it. “A container exits right after starting. How do you debug it?” is one of the most common questions you will get.</p>
 
-<h2>Three ideas, no more</h2>
+<h2>Key ideas</h2>
 <p><b>Always follow the same order: status → logs → inspect → exec.</b> Don't guess, and don't rebuild blindly. Like a doctor: first check if the patient is breathing (<code>docker ps -a</code>), then ask what happened (<code>docker logs</code>), then read the full report (<code>docker inspect</code>), and only then go inside (<code>docker exec</code>). Nine times out of ten, the logs already tell you the answer.</p>
 <p><b>A container lives only as long as its main process.</b> In your OS course you learnt that every process has a PID and an exit code. The command in <code>CMD</code> runs as PID 1 inside the container. When it ends, for any reason, the container stops. So “my container keeps exiting” really means “my main process keeps ending”, and the <em>exit code</em> tells you how it ended. <a href="https://docs.docker.com/reference/cli/docker/container/run/#exit-status">[Docker docs: exit status]</a></p>
 <p><b>Exit codes are clues.</b> Learn these few:</p>

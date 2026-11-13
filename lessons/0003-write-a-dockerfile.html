@@ -6,7 +6,7 @@
 <h2>Why this matters for DevOps</h2>
 <p>So far you have only used images that other people built. In a real job, you write the image for your team's app. In placement interviews, one of the most common tasks is “write a Dockerfile for this app”. Interviewers then ask why you ordered the lines the way you did. By the end of this lesson you can answer both.</p>
 
-<h2>Three ideas, no more</h2>
+<h2>Key ideas</h2>
 <p><b>A Dockerfile is a recipe.</b> It is a plain text file with step-by-step instructions: start from this base image, copy these files, run this command. <code>docker build</code> follows the recipe and produces an image. If you have written a Makefile or a build script in college, it is the same idea. <a href="https://docs.docker.com/reference/dockerfile/">[Dockerfile reference]</a></p>
 <p><b>Each instruction becomes a layer, and layers are cached.</b> You saw layers in lesson 2. When you rebuild, Docker reuses a layer if its instruction and its input files have not changed. The moment one layer changes, <em>every layer after it</em> is rebuilt. So you put things that change rarely (dependencies) at the top and things that change often (your code) at the bottom. <a href="https://docs.docker.com/build/cache/">[Docker docs: build cache]</a></p>
 <p><b><code>RUN</code> happens at build time. <code>CMD</code> happens at run time.</b> <code>RUN pip install …</code> executes once, while the image is being built, and the result is saved in a layer. <code>CMD</code> only records the command to start when someone does <code>docker run</code>. Think of it like compile time versus run time in C.</p>
